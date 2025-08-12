@@ -1,0 +1,127 @@
+package com.github.sun793188471.mvnversionhelper.ui
+
+import com.github.sun793188471.mvnversionhelper.settings.MavenVersionHelperSettings
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.Messages
+import com.intellij.ui.components.JBLabel
+import com.intellij.ui.components.JBList
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextField
+import java.awt.BorderLayout
+import java.awt.Dimension
+import java.awt.FlowLayout
+import javax.swing.*
+
+class ConfigurationDialog(
+    private val project: Project
+) : DialogWrapper(project) {
+
+    private val excludePathsListModel = DefaultListModel<String>()
+    private val excludePathsList = JBList(excludePathsListModel)
+    private val newPathField = JBTextField(30)
+    private val settings = MavenVersionHelperSettings.getInstance(project)
+
+    init {
+        title = "Maven Version Helper 配置"
+        init()
+        loadCurrentSettings()
+    }
+
+    private fun loadCurrentSettings() {
+        excludePathsListModel.clear()
+        settings.getExcludedPaths().forEach { path ->
+            excludePathsListModel.addElement(path)
+        }
+    }
+
+    override fun createCenterPanel(): JComponent {
+        val mainPanel = JPanel(BorderLayout())
+
+        // 标题和说明
+        val titlePanel = JPanel(FlowLayout(FlowLayout.LEFT))
+        titlePanel.add(JBLabel("配置需要排除的 POM 文件路径"))
+        mainPanel.add(titlePanel, BorderLayout.NORTH)
+
+        // 列表区域
+        val listPanel = JPanel(BorderLayout())
+        listPanel.add(JBLabel("排除路径列表:"), BorderLayout.NORTH)
+
+        excludePathsList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        val scrollPane = JBScrollPane(excludePathsList)
+        scrollPane.preferredSize = Dimension(400, 200)
+        listPanel.add(scrollPane, BorderLayout.CENTER)
+
+        // 操作按钮
+        val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT))
+        val removeButton = JButton("删除选中")
+        removeButton.addActionListener {
+            val selectedIndex = excludePathsList.selectedIndex
+            if (selectedIndex >= 0) {
+                excludePathsListModel.removeElementAt(selectedIndex)
+            }
+        }
+        buttonPanel.add(removeButton)
+        listPanel.add(buttonPanel, BorderLayout.SOUTH)
+
+        mainPanel.add(listPanel, BorderLayout.CENTER)
+
+        // 添加新路径区域
+        val addPanel = JPanel(BorderLayout())
+        addPanel.add(JBLabel("添加新的排除路径:"), BorderLayout.NORTH)
+
+        val inputPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+        inputPanel.add(JBLabel("路径:"))
+        inputPanel.add(newPathField)
+
+        val addButton = JButton("添加")
+        addButton.addActionListener {
+            val newPath = newPathField.text.trim()
+            if (newPath.isNotBlank()) {
+                if (!excludePathsListModel.contains(newPath)) {
+                    excludePathsListModel.addElement(newPath)
+                    newPathField.text = ""
+                } else {
+                    Messages.showWarningDialog(
+                        project, "路径 '$newPath' 已存在", "重复路径"
+                    )
+                }
+            }
+        }
+        inputPanel.add(addButton)
+
+        addPanel.add(inputPanel, BorderLayout.CENTER)
+
+        // 说明文本
+        val helpPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+        helpPanel.add(JBLabel("<html><small>说明: 以 '/' 开头的相对路径，如 '/dalgen', '/target' 等</small></html>"))
+        addPanel.add(helpPanel, BorderLayout.SOUTH)
+
+        mainPanel.add(addPanel, BorderLayout.SOUTH)
+
+        return mainPanel
+    }
+
+    override fun createActions(): Array<Action> {
+        return arrayOf(okAction, cancelAction)
+    }
+
+    override fun doOKAction() {
+        // 保存配置
+        val paths = mutableListOf<String>()
+        for (i in 0 until excludePathsListModel.size()) {
+            paths.add(excludePathsListModel.getElementAt(i))
+        }
+        settings.setExcludedPaths(paths)
+
+        Messages.showInfoMessage(
+            project, "配置已保存", "保存成功"
+        )
+
+        super.doOKAction()
+    }
+
+    override fun getPreferredSize(): Dimension {
+        return Dimension(500, 400)
+    }
+}

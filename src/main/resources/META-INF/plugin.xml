@@ -5,11 +5,16 @@
     <vendor>sun793188471</vendor>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
 
-    <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.sun793188471.mvnversionhelper.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="com.github.sun793188471.mvnversionhelper.startup.MyProjectActivity" />
-    </extensions>
+    <actions>
+        <action id="UpdateMavenVersion"
+                class="com.github.sun793188471.mvnversionhelper.action.UpdateMavenVersionAction"
+                text="Update Maven Version" description="Update Maven version in pom.xml">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>
