@@ -21,7 +21,14 @@ kotlin {
 
 // Configure project's dependencies
 repositories {
+    // 添加阿里云镜像（优先使用）
+    maven { url = uri("https://maven.aliyun.com/repository/public/") }
+    maven { url = uri("https://maven.aliyun.com/repository/central/") }
+    maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin/") }
+
+    // 备用仓库
     mavenCentral()
+    gradlePluginPortal()
 
     // IntelliJ Platform Gradle Plugin Repositories Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-repositories-extension.html
     intellijPlatform {

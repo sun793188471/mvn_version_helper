@@ -20,6 +20,7 @@ class ConfigurationDialog(
     private val excludePathsListModel = DefaultListModel<String>()
     private val excludePathsList = JBList(excludePathsListModel)
     private val newPathField = JBTextField(30)
+    private val groupIdPrefixField = JBTextField(20)
     private val settings = MavenVersionHelperSettings.getInstance(project)
 
     init {
@@ -38,10 +39,21 @@ class ConfigurationDialog(
     override fun createCenterPanel(): JComponent {
         val mainPanel = JPanel(BorderLayout())
 
+        // 创建Tab面板
+        val tabbedPane = JTabbedPane()
+        tabbedPane.addTab("排除路径", createExcludePathPanel())
+        tabbedPane.addTab("版本检查", createVersionCheckPanel())
+
+        mainPanel.add(tabbedPane, BorderLayout.CENTER)
+
+        return mainPanel
+    }
+    private fun createExcludePathPanel(): JComponent {
+        val panel = JPanel(BorderLayout())
         // 标题和说明
         val titlePanel = JPanel(FlowLayout(FlowLayout.LEFT))
         titlePanel.add(JBLabel("配置需要排除的 POM 文件路径"))
-        mainPanel.add(titlePanel, BorderLayout.NORTH)
+        panel.add(titlePanel, BorderLayout.NORTH)
 
         // 列表区域
         val listPanel = JPanel(BorderLayout())
@@ -64,7 +76,7 @@ class ConfigurationDialog(
         buttonPanel.add(removeButton)
         listPanel.add(buttonPanel, BorderLayout.SOUTH)
 
-        mainPanel.add(listPanel, BorderLayout.CENTER)
+        panel.add(listPanel, BorderLayout.CENTER)
 
         // 添加新路径区域
         val addPanel = JPanel(BorderLayout())
@@ -97,22 +109,43 @@ class ConfigurationDialog(
         helpPanel.add(JBLabel("<html><small>说明: 以 '/' 开头的相对路径，如 '/dalgen', '/target' 等</small></html>"))
         addPanel.add(helpPanel, BorderLayout.SOUTH)
 
-        mainPanel.add(addPanel, BorderLayout.SOUTH)
+        panel.add(addPanel, BorderLayout.SOUTH)
 
-        return mainPanel
+        return panel
     }
 
-    override fun createActions(): Array<Action> {
-        return arrayOf(okAction, cancelAction)
+    private fun createVersionCheckPanel(): JComponent {
+        val panel = JPanel(BorderLayout())
+
+        val configPanel = JPanel()
+        configPanel.layout = BoxLayout(configPanel, BoxLayout.Y_AXIS)
+
+        // GroupId前缀配置
+        val prefixPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+        prefixPanel.add(JBLabel("GroupId前缀:"))
+        prefixPanel.add(groupIdPrefixField)
+        configPanel.add(prefixPanel)
+
+        // 说明
+        val helpPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+        helpPanel.add(JBLabel("<html><small>说明: 版本检查只会检查以此前缀开头的GroupId，默认为'com.ly'</small></html>"))
+        configPanel.add(helpPanel)
+
+        panel.add(configPanel, BorderLayout.NORTH)
+
+        return panel
     }
 
     override fun doOKAction() {
-        // 保存配置
+        // 保存排除路径配置
         val paths = mutableListOf<String>()
         for (i in 0 until excludePathsListModel.size()) {
             paths.add(excludePathsListModel.getElementAt(i))
         }
         settings.setExcludedPaths(paths)
+
+        // 保存GroupId前缀配置
+        settings.setGroupIdPrefix(groupIdPrefixField.text.trim())
 
         Messages.showInfoMessage(
             project, "配置已保存", "保存成功"
@@ -121,7 +154,8 @@ class ConfigurationDialog(
         super.doOKAction()
     }
 
+
     override fun getPreferredSize(): Dimension {
-        return Dimension(500, 400)
+        return Dimension(600, 450)
     }
 }

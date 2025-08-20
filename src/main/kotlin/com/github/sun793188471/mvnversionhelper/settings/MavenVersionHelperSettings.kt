@@ -11,7 +11,8 @@ import com.intellij.openapi.project.Project
 class MavenVersionHelperSettings : PersistentStateComponent<MavenVersionHelperSettings.State> {
 
     data class State(
-        var excludedPaths: MutableList<String> = mutableListOf("/dalgen")
+        var excludedPaths: MutableList<String> = mutableListOf("/dalgen"),
+        var groupIdPrefix: String = "com.ly"
     )
 
     private var myState = State()
@@ -26,6 +27,12 @@ class MavenVersionHelperSettings : PersistentStateComponent<MavenVersionHelperSe
 
     fun setExcludedPaths(paths: List<String>) {
         myState.excludedPaths = paths.toMutableList()
+    }
+
+    fun getGroupIdPrefix(): String = myState.groupIdPrefix
+
+    fun setGroupIdPrefix(prefix: String) {
+        myState.groupIdPrefix = prefix
     }
 
     companion object {
