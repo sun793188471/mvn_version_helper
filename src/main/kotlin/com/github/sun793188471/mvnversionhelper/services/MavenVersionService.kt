@@ -202,8 +202,7 @@ class MavenVersionService(private val project: Project) {
     /**
      * 获取当前项目的远端版本信息
      */
-    fun getCurrentProjectRemoteVersions(branchType: BranchType? = null): Pair<String?, String?> {
-        val pomFiles = findPomFiles()
+    fun getCurrentProjectRemoteVersions(branchType: BranchType? = null, pomFiles: List<XmlFile>): Pair<String?, String?> {
         if (pomFiles.isEmpty()) return Pair(null, null)
 
         val mainPomFile = pomFiles.first()
@@ -291,8 +290,8 @@ class MavenVersionService(private val project: Project) {
                 }
             }
 
-            // 开发分支 XXX/XXX/Task_12345_XXX
-            branchName.contains("/Task_") -> {
+            // 开发分支 Task_12345_XXX
+            branchName.contains("Task_") -> {
                 BranchType.TASK
             }
 
@@ -304,7 +303,7 @@ class MavenVersionService(private val project: Project) {
      * 从开发分支中提取任务号 - 基于清理后的分支名称
      */
     fun extractTaskNumber(branchName: String): String? {
-        val taskRegex = Regex("/Task_(\\d+)_")
+        val taskRegex = Regex("Task_(\\d+)_")
         val match = taskRegex.find(branchName)
         return match?.groupValues?.get(1)
     }

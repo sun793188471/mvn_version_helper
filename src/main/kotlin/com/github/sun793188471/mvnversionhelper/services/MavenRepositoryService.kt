@@ -59,7 +59,11 @@ class MavenRepositoryService(private val project: Project) {
     /**
      * 查询远程仓库中的版本信息
      */
-    fun getRemoteVersions(groupId: String, artifactId: String, branchType: MavenVersionService.BranchType? = null): Pair<String?, String?> {
+    fun getRemoteVersions(
+        groupId: String,
+        artifactId: String,
+        branchType: MavenVersionService.BranchType? = null
+    ): Pair<String?, String?> {
         val repositories = getRepositoryUrls()
 
         for (repoUrl in repositories) {
@@ -116,69 +120,159 @@ class MavenRepositoryService(private val project: Project) {
         branchType: MavenVersionService.BranchType?
     ): Pair<String?, String?> {
         try {
-            var latestVersion: String? = null
             var releaseVersion: String? = null
+            var latestSnapshot: String? = null
 
-            // 解析所有版本
-            val versionsRegex = Regex("<version>([^<]+)</version>")
-            val allVersions = versionsRegex.findAll(xmlContent).map { it.groupValues[1].trim() }.toList()
+            // 获取 release 版本（保持原有逻辑）
+            val releaseRegex = Regex("<release>(.*?)</release>")
+            val releaseMatch = releaseRegex.find(xmlContent)
+            releaseVersion = releaseMatch?.groupValues?.get(1)?.trim()
 
-            if (allVersions.isEmpty()) {
-                return Pair(null, null)
+            // 获取所有版本号
+            val versionRegex = Regex("<version>(.*?)</version>")
+            val allVersions = versionRegex.findAll(xmlContent)
+                .map { it.groupValues[1] }
+                .toList()
+            // 过滤 SNAPSHOT 版本
+            val snapshotVersions = allVersions.filter { version ->
+                version.endsWith("-SNAPSHOT", ignoreCase = true)
             }
 
-            // 根据分支类型过滤和选择版本
+            // 根据分支类型进行进一步筛选和排序
             when (branchType) {
                 MavenVersionService.BranchType.QA -> {
-                    // 筛选qa版本并选择最大的
-                    val qaVersions = allVersions.filter { it.contains("-qa-", ignoreCase = true) }
-                    latestVersion = getMaxVersion(qaVersions)
-
-                    // Release版本仍然是正式版本
-                    releaseVersion = getMaxReleaseVersion(allVersions)
+                    val qaVersions = snapshotVersions.filter { version ->
+                        version.contains("qa", ignoreCase = true)
+                    }
+                    latestSnapshot = qaVersions.maxWithOrNull(VersionComparator())
                 }
 
                 MavenVersionService.BranchType.UAT -> {
-                    // 筛选uat版本并选择最大的
-                    val uatVersions = allVersions.filter { it.contains("-uat-", ignoreCase = true) }
-                    latestVersion = getMaxVersion(uatVersions)
+                    val uatVersions = snapshotVersions.filter { version ->
+                        version.contains("uat", ignoreCase = true)
+                    }
+                    latestSnapshot = uatVersions.maxWithOrNull(VersionComparator())
+                }
 
-                    // Release版本仍然是正式版本
-                    releaseVersion = getMaxReleaseVersion(allVersions)
+                MavenVersionService.BranchType.TASK -> {
+                    // 匹配包含任务号的 SNAPSHOT 版本（数字格式）
+                    val taskVersions = snapshotVersions.filter { version ->
+                        val hasTaskNumber = Regex("-\\d+-SNAPSHOT$", RegexOption.IGNORE_CASE).containsMatchIn(version)
+                        val isNotQaUat = !version.contains("qa", ignoreCase = true) &&
+                                !version.contains("uat", ignoreCase = true)
+                        hasTaskNumber && isNotQaUat
+                    }
+                    // 直接倒序取最新版本，因为 version 列表本身就是按发布时间排序的
+                    latestSnapshot = taskVersions.lastOrNull()
                 }
 
                 else -> {
-                    // 其他情况使用原逻辑
-                    // 解析 <latest> 标签
-                    val latestRegex = Regex("<latest>([^<]+)</latest>")
-                    val latestMatch = latestRegex.find(xmlContent)
-                    latestMatch?.let {
-                        latestVersion = it.groupValues[1].trim()
-                    }
-
-                    // 解析 <release> 标签
-                    val releaseRegex = Regex("<release>([^<]+)</release>")
-                    val releaseMatch = releaseRegex.find(xmlContent)
-                    releaseMatch?.let {
-                        releaseVersion = it.groupValues[1].trim()
-                    }
-
-                    // 如果没有找到latest或release标签，从所有版本中选择
-                    if (latestVersion == null) {
-                        latestVersion = getMaxVersion(allVersions.filter { it.contains("SNAPSHOT", ignoreCase = true) })
-                    }
-                    if (releaseVersion == null) {
-                        releaseVersion = getMaxReleaseVersion(allVersions)
-                    }
+                    // 其他情况获取所有 SNAPSHOT 中的最新版本
+                    latestSnapshot = snapshotVersions.maxWithOrNull(VersionComparator())
                 }
             }
 
-            logger.info("解析版本信息 - Latest: $latestVersion, Release: $releaseVersion")
-            return Pair(releaseVersion, latestVersion)
+            return Pair(releaseVersion, latestSnapshot)
         } catch (e: Exception) {
             logger.warn("解析版本元数据失败", e)
             return Pair(null, null)
         }
+    }
+
+    /**
+     * Maven 版本号比较器
+     */
+    private class VersionComparator : Comparator<String> {
+        override fun compare(v1: String, v2: String): Int {
+            return compareVersions(v1, v2)
+        }
+
+        private fun compareVersions(version1: String, version2: String): Int {
+            val v1Parts = parseVersion(version1)
+            val v2Parts = parseVersion(version2)
+
+            // 先比较数字部分
+            val numbersComparison = compareNumberParts(v1Parts.numbers, v2Parts.numbers)
+            if (numbersComparison != 0) {
+                return numbersComparison
+            }
+
+            // 数字部分相同，比较限定符
+            return compareQualifiers(v1Parts.qualifier, v2Parts.qualifier)
+        }
+
+        private fun parseVersion(version: String): VersionParts {
+            // 移除 -SNAPSHOT 后缀进行解析
+            val cleanVersion = version.replace(Regex("-SNAPSHOT$", RegexOption.IGNORE_CASE), "")
+
+            // 分离数字部分和限定符
+            val parts = cleanVersion.split(Regex("[-.]"))
+            val numbers = mutableListOf<Int>()
+            val qualifierParts = mutableListOf<String>()
+
+            var inQualifier = false
+
+            for (part in parts) {
+                val numValue = part.toIntOrNull()
+                if (numValue != null && !inQualifier) {
+                    numbers.add(numValue)
+                } else {
+                    inQualifier = true
+                    qualifierParts.add(part)
+                }
+            }
+
+            val qualifier = qualifierParts.joinToString("-")
+            return VersionParts(numbers, qualifier)
+        }
+
+        private fun compareNumberParts(numbers1: List<Int>, numbers2: List<Int>): Int {
+            val maxLength = maxOf(numbers1.size, numbers2.size)
+
+            for (i in 0 until maxLength) {
+                val n1 = numbers1.getOrElse(i) { 0 }
+                val n2 = numbers2.getOrElse(i) { 0 }
+                val comparison = n1.compareTo(n2)
+                if (comparison != 0) {
+                    return comparison
+                }
+            }
+
+            return 0
+        }
+
+        private fun compareQualifiers(q1: String, q2: String): Int {
+            if (q1.isEmpty() && q2.isEmpty()) return 0
+            if (q1.isEmpty()) return 1  // 无限定符的版本更高
+            if (q2.isEmpty()) return -1
+
+            // 如果都是 SNAPSHOT 版本，比较具体的限定符
+            return compareSnapshotQualifiers(q1, q2)
+        }
+
+        private fun compareSnapshotQualifiers(q1: String, q2: String): Int {
+            // 提取任务号进行比较
+            val task1 = extractTaskNumber(q1)
+            val task2 = extractTaskNumber(q2)
+
+            return when {
+                task1 != null && task2 != null -> task1.compareTo(task2)
+                task1 != null && task2 == null -> 1  // 有任务号的版本更高
+                task1 == null && task2 != null -> -1
+                else -> q1.compareTo(q2)  // 字符串比较
+            }
+        }
+
+        private fun extractTaskNumber(qualifier: String): Int? {
+            val taskRegex = Regex("(\\d+)")
+            val match = taskRegex.find(qualifier)
+            return match?.value?.toIntOrNull()
+        }
+
+        private data class VersionParts(
+            val numbers: List<Int>,
+            val qualifier: String
+        )
     }
 
     /**

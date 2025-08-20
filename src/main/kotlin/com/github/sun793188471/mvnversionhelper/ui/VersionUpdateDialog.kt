@@ -39,10 +39,10 @@ class VersionUpdateDialog(
     private val repositoryService = MavenRepositoryService.getInstance(project)
     private val logger = Logger.getInstance(VersionUpdateDialog::class.java)
 
-    private val pomFiles = versionService.findPomFiles()
+    private var pomFiles = versionService.findPomFiles()
     private val realBranchName = versionService.getRealBranchName()
     private val branchType = versionService.getBranchType(realBranchName)
-    private val currentProjectVersion = versionService.getCurrentProjectRemoteVersions(branchType)
+    private val currentProjectVersion = versionService.getCurrentProjectRemoteVersions(branchType, pomFiles)
 
     // 用于缓存版本信息，避免重复请求
     private val versionCache = ConcurrentHashMap<String, Pair<String?, String?>>()
@@ -396,22 +396,18 @@ class VersionUpdateDialog(
         val configBtn = JButton("配置")
         configBtn.addActionListener {
             val configDialog = ConfigurationDialog(project)
-            if (configDialog.showAndGet()) {
-                // 配置保存后，重置加载状态和清空缓存，但不立即重新加载
-                versionCache.clear()
-                // 只有当POM文件列表发生变化时才重新加载
-                val newPomFiles = versionService.findPomFiles()
-                if (newPomFiles.size != pomFiles.size ||
-                    newPomFiles.map { it.virtualFile.path } != pomFiles.map { it.virtualFile.path }
-                ) {
-                    // POM文件列表发生变化，需要重新加载
-                    loadPomFiles()
-                }
-            }
+            configDialog.showAndGet()
         }
         inputPanel.add(configBtn)
 
         mainPanel.add(inputPanel, gbc)
+
+        // 刷新按钮
+        val refreshButton = JButton("刷新")
+        refreshButton.addActionListener {
+            refreshData()
+        }
+        inputPanel.add(refreshButton)
 
         // POM文件列表标题和全选按钮
         gbc.gridy = 3
@@ -445,6 +441,76 @@ class VersionUpdateDialog(
         loadPomFiles()
 
         return mainPanel
+    }
+
+    /**
+     * 刷新数据 - 清除缓存并重新加载所有数据
+     */
+    private fun refreshData() {
+        val task = object : Task.Backgroundable(project, "正在刷新数据...", true) {
+            override fun run(indicator: ProgressIndicator) {
+                try {
+                    indicator.text = "清除缓存..."
+                    indicator.fraction = 0.1
+
+                    // 清除版本缓存
+                    versionCache.clear()
+                    logger.info("已清除版本缓存")
+
+                    indicator.text = "重新扫描 POM 文件..."
+                    indicator.fraction = 0.3
+
+                    // 重新获取 POM 文件列表
+                    val refreshedPomFiles = versionService.findPomFiles()
+                    pomFiles = refreshedPomFiles
+
+                    logger.info("重新扫描到 ${refreshedPomFiles.size} 个 POM 文件")
+
+                    indicator.text = "重新获取项目版本信息..."
+                    indicator.fraction = 0.5
+
+                    // 重新获取项目版本信息
+                    val refreshedProjectVersion = versionService.getCurrentProjectRemoteVersions(branchType, pomFiles)
+                    logger.info("重新获取项目版本信息: Release=${refreshedProjectVersion.first}, Snapshot=${refreshedProjectVersion.second}")
+
+                    indicator.text = "更新界面..."
+                    indicator.fraction = 0.8
+
+                    // 清空当前列表
+                    pomFileCheckboxes.clear()
+                    listPanel.removeAll()
+
+                    // 重新加载项目版本信息面板
+                    loadProjectVersionInfo()
+                    // 重新加载 POM 文件列表
+                    loadPomFiles()
+
+                    // 刷新界面
+                    listPanel.revalidate()
+                    listPanel.repaint()
+                    scrollPane.revalidate()
+                    scrollPane.repaint()
+
+                    indicator.fraction = 1.0
+                    logger.info("数据刷新完成")
+
+                    Messages.showInfoMessage(
+                        project,
+                        "数据刷新完成！\n扫描到 ${refreshedPomFiles.size} 个 POM 文件",
+                        "刷新成功"
+                    )
+                } catch (e: Exception) {
+                    logger.warn("刷新数据时发生错误", e)
+                    Messages.showErrorDialog(
+                        project,
+                        "刷新数据时发生错误: ${e.message}",
+                        "刷新失败"
+                    )
+                }
+            }
+        }
+
+        ProgressManager.getInstance().run(task)
     }
 
     private fun createBranchInfoPanel(realBranchName: String?): JPanel {
