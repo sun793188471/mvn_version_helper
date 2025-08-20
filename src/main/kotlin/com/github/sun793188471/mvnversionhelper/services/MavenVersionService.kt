@@ -321,7 +321,7 @@ class MavenVersionService(private val project: Project) {
             val release = currentProjectVersion.first;
             // 获取远端最新的 RELEASE 版本
             if (release == null) {
-                logger.warn("无法获取远端 RELEASE 版本，无法推荐版本号")
+                logger.warn("无法获取Release 版本，无法推荐版本号")
                 return null
             }
             // 解析版本号并增加小版本

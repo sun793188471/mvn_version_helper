@@ -18,6 +18,8 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import java.awt.*
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -42,6 +44,9 @@ class VersionUpdateDialog(
     private val branchType = versionService.getBranchType(realBranchName)
     private val currentProjectVersion = versionService.getCurrentProjectRemoteVersions(branchType)
 
+    // 用于缓存版本信息，避免重复请求
+    private val versionCache = ConcurrentHashMap<String, Pair<String?, String?>>()
+
     init {
         title = "Update Maven Version"
         init()
@@ -58,6 +63,8 @@ class VersionUpdateDialog(
             val gbc = GridBagConstraints()
             gbc.anchor = GridBagConstraints.WEST
             gbc.insets = Insets(2, 5, 2, 5)
+
+            val versionInfoPanels = mutableListOf<Pair<XmlFile, JPanel>>()
 
             pomFiles.forEachIndexed { index, pomFile ->
                 gbc.gridx = 0
@@ -87,19 +94,93 @@ class VersionUpdateDialog(
                 versionInfoPanel.add(JBLabel("正在加载..."))
                 listPanel.add(versionInfoPanel, gbc)
 
-                // 同步加载远端版本信息
-                loadRemoteVersionInfo(pomFile, versionInfoPanel)
+                versionInfoPanels.add(Pair(pomFile, versionInfoPanel))
             }
 
             updateSelectAllCheckboxState()
+
+            // 如果版本信息还未加载，启动异步加载
+            loadRemoteVersionsAsync(versionInfoPanels)
         }
 
         listPanel.revalidate()
         listPanel.repaint()
     }
 
-    private fun loadRemoteVersionInfo(pomFile: XmlFile, versionInfoPanel: JPanel) {
+    private fun loadRemoteVersionsAsync(versionInfoPanels: List<Pair<XmlFile, JPanel>>) {
+        val task = object : Task.Backgroundable(project, "正在加载远端版本信息...", false) {
+            override fun run(indicator: ProgressIndicator) {
+
+                // 收集所有需要查询的模块信息
+                val moduleInfoList = mutableListOf<Triple<String, String, Pair<XmlFile, JPanel>>>()
+
+                versionInfoPanels.forEach { (pomFile, panel) ->
+                    val rootTag = pomFile.rootTag
+                    if (rootTag != null) {
+                        val groupId = rootTag.findFirstSubTag("groupId")?.value?.text
+                            ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
+                        val artifactId = rootTag.findFirstSubTag("artifactId")?.value?.text
+
+                        if (groupId != null && artifactId != null) {
+                            val cacheKey = "$groupId:$artifactId"
+                            if (!versionCache.containsKey(cacheKey)) {
+                                moduleInfoList.add(Triple(groupId, artifactId, pomFile to panel))
+                            }
+                        }
+                    }
+                }
+
+                // 并行获取所有版本信息，但不直接更新UI
+                val futures = moduleInfoList.mapIndexed { index, (groupId, artifactId, _) ->
+                    CompletableFuture.supplyAsync {
+                        try {
+                            indicator.text = "正在获取 $groupId:$artifactId 版本信息"
+                            indicator.fraction = index.toDouble() / moduleInfoList.size
+
+                            val versions = repositoryService.getRemoteVersions(groupId, artifactId, branchType)
+                            val cacheKey = "$groupId:$artifactId"
+                            versionCache[cacheKey] = versions
+
+                            return@supplyAsync Triple(groupId, artifactId, versions)
+                        } catch (e: Exception) {
+                            logger.warn("获取版本信息失败: $groupId:$artifactId", e)
+                            return@supplyAsync null
+                        }
+                    }
+                }
+
+                CompletableFuture.allOf(*futures.toTypedArray())
+                    .get(30, java.util.concurrent.TimeUnit.SECONDS)
+
+                logger.info("版本信息获取完成，缓存大小: ${versionCache.size}")
+                logger.info("正在更新UI面板")
+                updateAllPanelsWithCachedData(versionInfoPanels)
+            }
+
+            override fun onCancel() {
+                // 取消时不清理缓存，保留已获取的数据
+                logger.info("用户取消了版本信息加载")
+            }
+        }
+        ProgressManager.getInstance().run(task)
+    }
+
+    private fun updateAllPanelsWithCachedData(versionInfoPanels: List<Pair<XmlFile, JPanel>>) {
+        versionInfoPanels.forEach { (pomFile, panel) ->
+            updateVersionInfoPanel(pomFile, panel)
+        }
+    }
+
+    private fun showErrorInAllPanels(versionInfoPanels: List<Pair<XmlFile, JPanel>>, errorMessage: String) {
+        versionInfoPanels.forEach { (_, panel) ->
+            showErrorInPanel(panel, errorMessage)
+        }
+    }
+
+    private fun updateVersionInfoPanel(pomFile: XmlFile, versionInfoPanel: JPanel) {
         try {
+            versionInfoPanel.removeAll()
+
             val rootTag = pomFile.rootTag
             if (rootTag != null) {
                 val groupId = rootTag.findFirstSubTag("groupId")?.value?.text
@@ -107,45 +188,94 @@ class VersionUpdateDialog(
                 val artifactId = rootTag.findFirstSubTag("artifactId")?.value?.text
 
                 if (groupId != null && artifactId != null) {
-                    val (latestRelease, latestSnapshot) = repositoryService.getRemoteVersions(groupId, artifactId)
+                    val cacheKey = "$groupId:$artifactId"
+                    val versions = versionCache[cacheKey]
 
-                    versionInfoPanel.removeAll()
-                    versionInfoPanel.layout = FlowLayout(FlowLayout.LEFT)
-
-                    versionInfoPanel.add(JBLabel("远端版本 - "))
-
-                    if (latestRelease != null) {
-                        versionInfoPanel.add(JBLabel("RELEASE: $latestRelease"))
+                    if (versions != null) {
+                        updateVersionInfoPanelWithVersions(pomFile, versionInfoPanel, versions)
                     } else {
-                        versionInfoPanel.add(JBLabel("RELEASE: 无"))
-                    }
-
-                    versionInfoPanel.add(JBLabel(" | "))
-
-                    if (latestSnapshot != null) {
-                        versionInfoPanel.add(JBLabel("SNAPSHOT: $latestSnapshot"))
-                    } else {
-                        versionInfoPanel.add(JBLabel("SNAPSHOT: 无"))
+                        versionInfoPanel.add(JBLabel("等待加载..."))
                     }
                 } else {
-                    versionInfoPanel.removeAll()
-                    versionInfoPanel.add(JBLabel("无法获取模块信息"))
+                    versionInfoPanel.add(JBLabel("无法获取项目信息"))
                 }
             } else {
-                versionInfoPanel.removeAll()
-                versionInfoPanel.add(JBLabel("POM文件解析失败"))
+                versionInfoPanel.add(JBLabel("POM文件格式错误"))
             }
 
             versionInfoPanel.revalidate()
             versionInfoPanel.repaint()
 
         } catch (e: Exception) {
-            logger.warn("获取远端版本信息失败", e)
+            logger.warn("更新版本信息面板失败: ${pomFile.virtualFile.path}", e)
+            showErrorInPanel(versionInfoPanel, "更新失败")
+        }
+    }
+
+    private fun updateVersionInfoPanelWithVersions(
+        pomFile: XmlFile,
+        versionInfoPanel: JPanel,
+        versions: Pair<String?, String?>
+    ) {
+        try {
             versionInfoPanel.removeAll()
-            versionInfoPanel.add(JBLabel("获取远端版本失败"))
+
+            val rootTag = pomFile.rootTag
+            if (rootTag != null) {
+                val groupId = rootTag.findFirstSubTag("groupId")?.value?.text
+                    ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
+                val artifactId = rootTag.findFirstSubTag("artifactId")?.value?.text
+
+                if (groupId != null && artifactId != null) {
+                    val infoPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+
+                    // 显示远端版本信息
+                    val (release, latest) = versions
+                    infoPanel.add(JBLabel("最新版本"))
+                    if (release != null) {
+                        infoPanel.add(JBLabel("Release:$release"))
+                    } else {
+                        infoPanel.add(JBLabel("Release:无"))
+                    }
+
+                    infoPanel.add(JBLabel("|"))
+
+                    if (latest != null) {
+                        infoPanel.add(JBLabel("Snapshot:$latest"))
+                    } else {
+                        infoPanel.add(JBLabel("Snapshot:无"))
+                    }
+                    versionInfoPanel.add(infoPanel)
+                } else {
+                    versionInfoPanel.add(JBLabel("GroupId 或 ArtifactId 为空"))
+                }
+            } else {
+                versionInfoPanel.add(JBLabel("POM文件格式错误"))
+            }
+
             versionInfoPanel.revalidate()
             versionInfoPanel.repaint()
+
+        } catch (e: Exception) {
+            logger.warn("更新版本信息面板失败: ${pomFile.virtualFile.path}", e)
+            showErrorInPanel(versionInfoPanel, "更新失败")
         }
+    }
+
+    private fun showErrorInPanel(panel: JPanel, message: String) {
+        try {
+            panel.removeAll()
+            panel.add(JBLabel(message))
+            panel.revalidate()
+            panel.repaint()
+        } catch (e: Exception) {
+            logger.warn("显示错误信息失败", e)
+        }
+    }
+
+    override fun doCancelAction() {
+        // 取消时不清理缓存，保留已获取的数据用于下次打开
+        super.doCancelAction()
     }
 
     private fun loadProjectVersionInfo() {
@@ -159,16 +289,16 @@ class VersionUpdateDialog(
                 projectVersionPanel.add(JBLabel("当前项目: $groupId:$artifactId"))
                 projectVersionPanel.add(JBLabel(" | "))
 
-                if (currentProjectVersion.second != null) {
-                    projectVersionPanel.add(JBLabel("远端 RELEASE: ${currentProjectVersion.first}"))
+                if (currentProjectVersion.first != null) {
+                    projectVersionPanel.add(JBLabel("Release: ${currentProjectVersion.first}"))
                 } else {
-                    projectVersionPanel.add(JBLabel("远端 RELEASE: 无"))
+                    projectVersionPanel.add(JBLabel("Release: 无"))
                 }
 
                 projectVersionPanel.add(JBLabel(" | "))
 
-                if (currentProjectVersion.first != null) {
-                    projectVersionPanel.add(JBLabel("远端 SNAPSHOT:  ${currentProjectVersion.second}"))
+                if (currentProjectVersion.second != null) {
+                    projectVersionPanel.add(JBLabel("远端 SNAPSHOT: ${currentProjectVersion.second}"))
                 } else {
                     projectVersionPanel.add(JBLabel("远端 SNAPSHOT: 无"))
                 }
@@ -262,13 +392,21 @@ class VersionUpdateDialog(
         }
         inputPanel.add(latestSnapshotButton)
 
-        // 添加配置按钮
+        // 修改配置按钮的处理逻辑
         val configBtn = JButton("配置")
         configBtn.addActionListener {
             val configDialog = ConfigurationDialog(project)
             if (configDialog.showAndGet()) {
-                // 配置保存后重新加载POM文件列表
-                loadPomFiles()
+                // 配置保存后，重置加载状态和清空缓存，但不立即重新加载
+                versionCache.clear()
+                // 只有当POM文件列表发生变化时才重新加载
+                val newPomFiles = versionService.findPomFiles()
+                if (newPomFiles.size != pomFiles.size ||
+                    newPomFiles.map { it.virtualFile.path } != pomFiles.map { it.virtualFile.path }
+                ) {
+                    // POM文件列表发生变化，需要重新加载
+                    loadPomFiles()
+                }
             }
         }
         inputPanel.add(configBtn)
@@ -299,7 +437,7 @@ class VersionUpdateDialog(
         listPanel.layout = GridBagLayout()
 
         scrollPane = JBScrollPane(listPanel)
-        scrollPane.preferredSize = Dimension(700, 250)
+        scrollPane.preferredSize = Dimension(1200, 500)
         mainPanel.add(scrollPane, gbc)
 
         // 在界面创建完成后加载信息
@@ -308,7 +446,6 @@ class VersionUpdateDialog(
 
         return mainPanel
     }
-
 
     private fun createBranchInfoPanel(realBranchName: String?): JPanel {
         val panel = JPanel(FlowLayout(FlowLayout.LEFT))
