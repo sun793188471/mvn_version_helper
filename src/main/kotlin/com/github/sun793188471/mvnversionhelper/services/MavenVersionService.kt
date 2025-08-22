@@ -138,7 +138,6 @@ class MavenVersionService(private val project: Project) {
 
             val currentBranch = repo.currentBranchName ?: return null
 
-            var branchName: String?;
             // 获取当前分支的上游分支信息
             val localBranch = repo.branches.findLocalBranch(currentBranch)
             if (localBranch != null) {
@@ -146,9 +145,9 @@ class MavenVersionService(private val project: Project) {
                 val remoteBranch = trackingInfo?.remoteBranch
 
                 if (remoteBranch != null) {
-                    // 返回实际分支名称，如 origin/feature/xxx
-                    branchName = remoteBranch.name
-                    return branchName.substringAfterLast("/");
+                    // 去除远端别名，保留完整分支路径
+                    // 例如：origin/111/222/aaa -> 111/222/aaa
+                    remoteBranch.nameForRemoteOperations
                 }
             }
 
@@ -158,8 +157,16 @@ class MavenVersionService(private val project: Project) {
                 it.name.endsWith("/$currentBranch")
             }
 
-            matchingRemote?.name ?: currentBranch
-
+            if (matchingRemote != null) {
+                val remoteBranchName = matchingRemote.name
+                val firstSlashIndex = remoteBranchName.indexOf("/")
+                return if (firstSlashIndex != -1) {
+                    remoteBranchName.substring(firstSlashIndex + 1)
+                } else {
+                    remoteBranchName
+                }
+            }
+            currentBranch
         } catch (e: Exception) {
             logger.warn("Failed to get remote branch info", e)
             null
@@ -279,8 +286,16 @@ class MavenVersionService(private val project: Project) {
 
             // walle/Conflict_ 开头的分支
             branchName.startsWith("walle/Conflict_") -> {
-                val conflictType = branchName.substringAfter("walle/Conflict_").substringBefore("_")
-                when (conflictType.lowercase()) {
+                val afterConflict = branchName.substringAfter("walle/Conflict_")
+                val conflictType = when {
+                    afterConflict.startsWith("uat", ignoreCase = true) -> "uat"
+                    afterConflict.startsWith("qa", ignoreCase = true) -> "qa"
+                    afterConflict.startsWith("hotfix", ignoreCase = true) -> "hotfix"
+                    afterConflict.startsWith("release", ignoreCase = true) -> "release"
+                    afterConflict.startsWith("master", ignoreCase = true) -> "master"
+                    else -> null
+                }
+                when (conflictType?.lowercase()) {
                     "qa" -> BranchType.QA
                     "uat" -> BranchType.UAT
                     "hotfix" -> BranchType.HOTFIX
