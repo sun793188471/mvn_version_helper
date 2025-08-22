@@ -17,12 +17,13 @@ import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
+import com.intellij.ui.table.JBTable
 import java.awt.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import javax.swing.JButton
-import javax.swing.JComponent
-import javax.swing.JPanel
+import javax.swing.*
+import javax.swing.table.DefaultTableModel
+import javax.swing.table.TableCellRenderer
 
 class VersionUpdateDialog(
     private val project: Project,
@@ -30,11 +31,10 @@ class VersionUpdateDialog(
 ) : DialogWrapper(project) {
 
     private val versionField = JBTextField(20)
-    private val pomFileCheckboxes = mutableListOf<Pair<JBCheckBox, XmlFile>>()
     private lateinit var selectAllCheckbox: JBCheckBox
-    private lateinit var listPanel: JPanel
-    private lateinit var scrollPane: JBScrollPane
     private lateinit var projectVersionPanel: JPanel
+    private lateinit var pomTable: JBTable
+    private lateinit var tableModel: DefaultTableModel
 
     private val repositoryService = MavenRepositoryService.getInstance(project)
     private val logger = Logger.getInstance(VersionUpdateDialog::class.java)
@@ -47,275 +47,21 @@ class VersionUpdateDialog(
     // 用于缓存版本信息，避免重复请求
     private val versionCache = ConcurrentHashMap<String, Pair<String?, String?>>()
 
+    // 数据类用于存储POM文件信息
+    data class PomFileInfo(
+        val xmlFile: XmlFile,
+        val path: String,
+        val localVersion: String,
+        var remoteSnapshot: String = "加载中...",
+        var remoteRelease: String = "加载中...",
+        var isSelected: Boolean = true
+    )
+
+    private val pomFileInfoList = mutableListOf<PomFileInfo>()
+
     init {
         title = "Update Maven Version"
         init()
-    }
-
-    private fun loadPomFiles() {
-        pomFileCheckboxes.clear()
-        listPanel.removeAll()
-
-        if (pomFiles.isEmpty()) {
-            listPanel.add(JBLabel("未找到 pom.xml 文件"))
-        } else {
-            listPanel.layout = GridBagLayout()
-            val gbc = GridBagConstraints()
-            gbc.anchor = GridBagConstraints.WEST
-            gbc.insets = Insets(2, 5, 2, 5)
-
-            val versionInfoPanels = mutableListOf<Pair<XmlFile, JPanel>>()
-
-            pomFiles.forEachIndexed { index, pomFile ->
-                gbc.gridx = 0
-                gbc.gridy = index
-                gbc.weightx = 0.0
-
-                val checkbox = JBCheckBox("${pomFile.virtualFile.path}", true)
-                pomFileCheckboxes.add(Pair(checkbox, pomFile))
-                checkbox.addActionListener { updateSelectAllCheckboxState() }
-                listPanel.add(checkbox, gbc)
-
-                // 添加检查依赖按钮
-                gbc.gridx = 1
-                gbc.weightx = 0.0
-                val checkDepsButton = JButton("检查依赖")
-                checkDepsButton.addActionListener {
-                    val depDialog = DependencyVersionCheckDialog(project, pomFile, versionService)
-                    depDialog.show()
-                }
-                listPanel.add(checkDepsButton, gbc)
-
-                // 添加版本信息面板
-                gbc.gridx = 2
-                gbc.weightx = 1.0
-                gbc.fill = GridBagConstraints.HORIZONTAL
-                val versionInfoPanel = JPanel()
-                versionInfoPanel.add(JBLabel("正在加载..."))
-                listPanel.add(versionInfoPanel, gbc)
-
-                versionInfoPanels.add(Pair(pomFile, versionInfoPanel))
-            }
-
-            updateSelectAllCheckboxState()
-
-            // 如果版本信息还未加载，启动异步加载
-            loadRemoteVersionsAsync(versionInfoPanels)
-        }
-
-        listPanel.revalidate()
-        listPanel.repaint()
-    }
-
-    private fun loadRemoteVersionsAsync(versionInfoPanels: List<Pair<XmlFile, JPanel>>) {
-        val task = object : Task.Backgroundable(project, "正在加载远端版本信息...", false) {
-            override fun run(indicator: ProgressIndicator) {
-
-                // 收集所有需要查询的模块信息
-                val moduleInfoList = mutableListOf<Triple<String, String, Pair<XmlFile, JPanel>>>()
-
-                versionInfoPanels.forEach { (pomFile, panel) ->
-                    val rootTag = pomFile.rootTag
-                    if (rootTag != null) {
-                        val groupId = rootTag.findFirstSubTag("groupId")?.value?.text
-                            ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
-                        val artifactId = rootTag.findFirstSubTag("artifactId")?.value?.text
-
-                        if (groupId != null && artifactId != null) {
-                            val cacheKey = "$groupId:$artifactId"
-                            if (!versionCache.containsKey(cacheKey)) {
-                                moduleInfoList.add(Triple(groupId, artifactId, pomFile to panel))
-                            }
-                        }
-                    }
-                }
-
-                // 并行获取所有版本信息，但不直接更新UI
-                val futures = moduleInfoList.mapIndexed { index, (groupId, artifactId, _) ->
-                    CompletableFuture.supplyAsync {
-                        try {
-                            indicator.text = "正在获取 $groupId:$artifactId 版本信息"
-                            indicator.fraction = index.toDouble() / moduleInfoList.size
-
-                            val versions = repositoryService.getRemoteVersions(groupId, artifactId, branchType)
-                            val cacheKey = "$groupId:$artifactId"
-                            versionCache[cacheKey] = versions
-
-                            return@supplyAsync Triple(groupId, artifactId, versions)
-                        } catch (e: Exception) {
-                            logger.warn("获取版本信息失败: $groupId:$artifactId", e)
-                            return@supplyAsync null
-                        }
-                    }
-                }
-
-                CompletableFuture.allOf(*futures.toTypedArray())
-                    .get(30, java.util.concurrent.TimeUnit.SECONDS)
-
-                logger.info("版本信息获取完成，缓存大小: ${versionCache.size}")
-                logger.info("正在更新UI面板")
-                updateAllPanelsWithCachedData(versionInfoPanels)
-            }
-
-            override fun onCancel() {
-                // 取消时不清理缓存，保留已获取的数据
-                logger.info("用户取消了版本信息加载")
-            }
-        }
-        ProgressManager.getInstance().run(task)
-    }
-
-    private fun updateAllPanelsWithCachedData(versionInfoPanels: List<Pair<XmlFile, JPanel>>) {
-        versionInfoPanels.forEach { (pomFile, panel) ->
-            updateVersionInfoPanel(pomFile, panel)
-        }
-    }
-
-    private fun showErrorInAllPanels(versionInfoPanels: List<Pair<XmlFile, JPanel>>, errorMessage: String) {
-        versionInfoPanels.forEach { (_, panel) ->
-            showErrorInPanel(panel, errorMessage)
-        }
-    }
-
-    private fun updateVersionInfoPanel(pomFile: XmlFile, versionInfoPanel: JPanel) {
-        try {
-            versionInfoPanel.removeAll()
-
-            val rootTag = pomFile.rootTag
-            if (rootTag != null) {
-                val groupId = rootTag.findFirstSubTag("groupId")?.value?.text
-                    ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
-                val artifactId = rootTag.findFirstSubTag("artifactId")?.value?.text
-
-                if (groupId != null && artifactId != null) {
-                    val cacheKey = "$groupId:$artifactId"
-                    val versions = versionCache[cacheKey]
-
-                    if (versions != null) {
-                        updateVersionInfoPanelWithVersions(pomFile, versionInfoPanel, versions)
-                    } else {
-                        versionInfoPanel.add(JBLabel("等待加载..."))
-                    }
-                } else {
-                    versionInfoPanel.add(JBLabel("无法获取项目信息"))
-                }
-            } else {
-                versionInfoPanel.add(JBLabel("POM文件格式错误"))
-            }
-
-            versionInfoPanel.revalidate()
-            versionInfoPanel.repaint()
-
-        } catch (e: Exception) {
-            logger.warn("更新版本信息面板失败: ${pomFile.virtualFile.path}", e)
-            showErrorInPanel(versionInfoPanel, "更新失败")
-        }
-    }
-
-    private fun updateVersionInfoPanelWithVersions(
-        pomFile: XmlFile,
-        versionInfoPanel: JPanel,
-        versions: Pair<String?, String?>
-    ) {
-        try {
-            versionInfoPanel.removeAll()
-
-            val rootTag = pomFile.rootTag
-            if (rootTag != null) {
-                val groupId = rootTag.findFirstSubTag("groupId")?.value?.text
-                    ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
-                val artifactId = rootTag.findFirstSubTag("artifactId")?.value?.text
-
-                if (groupId != null && artifactId != null) {
-                    val infoPanel = JPanel(FlowLayout(FlowLayout.LEFT))
-
-                    // 显示远端版本信息
-                    val (release, latest) = versions
-                    infoPanel.add(JBLabel("最新版本"))
-                    if (release != null) {
-                        infoPanel.add(JBLabel("Release:$release"))
-                    } else {
-                        infoPanel.add(JBLabel("Release:无"))
-                    }
-
-                    infoPanel.add(JBLabel("|"))
-
-                    if (latest != null) {
-                        infoPanel.add(JBLabel("Snapshot:$latest"))
-                    } else {
-                        infoPanel.add(JBLabel("Snapshot:无"))
-                    }
-                    versionInfoPanel.add(infoPanel)
-                } else {
-                    versionInfoPanel.add(JBLabel("GroupId 或 ArtifactId 为空"))
-                }
-            } else {
-                versionInfoPanel.add(JBLabel("POM文件格式错误"))
-            }
-
-            versionInfoPanel.revalidate()
-            versionInfoPanel.repaint()
-
-        } catch (e: Exception) {
-            logger.warn("更新版本信息面板失败: ${pomFile.virtualFile.path}", e)
-            showErrorInPanel(versionInfoPanel, "更新失败")
-        }
-    }
-
-    private fun showErrorInPanel(panel: JPanel, message: String) {
-        try {
-            panel.removeAll()
-            panel.add(JBLabel(message))
-            panel.revalidate()
-            panel.repaint()
-        } catch (e: Exception) {
-            logger.warn("显示错误信息失败", e)
-        }
-    }
-
-    override fun doCancelAction() {
-        // 取消时不清理缓存，保留已获取的数据用于下次打开
-        super.doCancelAction()
-    }
-
-    private fun loadProjectVersionInfo() {
-        try {
-            val (groupId, artifactId) = versionService.getParentProjectInfo(pomFiles)
-
-            projectVersionPanel.removeAll()
-            projectVersionPanel.layout = FlowLayout(FlowLayout.LEFT)
-
-            if (groupId != null && artifactId != null) {
-                projectVersionPanel.add(JBLabel("当前项目: $groupId:$artifactId"))
-                projectVersionPanel.add(JBLabel(" | "))
-
-                if (currentProjectVersion.first != null) {
-                    projectVersionPanel.add(JBLabel("Release: ${currentProjectVersion.first}"))
-                } else {
-                    projectVersionPanel.add(JBLabel("Release: 无"))
-                }
-
-                projectVersionPanel.add(JBLabel(" | "))
-
-                if (currentProjectVersion.second != null) {
-                    projectVersionPanel.add(JBLabel("远端 SNAPSHOT: ${currentProjectVersion.second}"))
-                } else {
-                    projectVersionPanel.add(JBLabel("远端 SNAPSHOT: 无"))
-                }
-            } else {
-                projectVersionPanel.add(JBLabel("无法获取当前项目版本信息"))
-            }
-
-            projectVersionPanel.revalidate()
-            projectVersionPanel.repaint()
-
-        } catch (e: Exception) {
-            logger.warn("获取项目版本信息失败", e)
-            projectVersionPanel.removeAll()
-            projectVersionPanel.add(JBLabel("获取项目版本信息失败"))
-            projectVersionPanel.revalidate()
-            projectVersionPanel.repaint()
-        }
     }
 
     override fun createCenterPanel(): JComponent {
@@ -400,14 +146,14 @@ class VersionUpdateDialog(
         }
         inputPanel.add(configBtn)
 
-        mainPanel.add(inputPanel, gbc)
-
         // 刷新按钮
         val refreshButton = JButton("刷新")
         refreshButton.addActionListener {
             refreshData()
         }
         inputPanel.add(refreshButton)
+
+        mainPanel.add(inputPanel, gbc)
 
         // POM文件列表标题和全选按钮
         gbc.gridy = 3
@@ -417,22 +163,19 @@ class VersionUpdateDialog(
         selectAllCheckbox = JBCheckBox("全选", true)
         selectAllCheckbox.addActionListener {
             val selected = selectAllCheckbox.isSelected
-            pomFileCheckboxes.forEach { (checkbox, _) ->
-                checkbox.isSelected = selected
-            }
+            pomFileInfoList.forEach { it.isSelected = selected }
+            refreshTable()
         }
         listHeaderPanel.add(selectAllCheckbox)
         mainPanel.add(listHeaderPanel, gbc)
 
-        // POM文件列表
+        // POM文件表格
         gbc.gridy = 4
         gbc.fill = GridBagConstraints.BOTH
         gbc.weighty = 1.0
 
-        listPanel = JPanel()
-        listPanel.layout = GridBagLayout()
-
-        scrollPane = JBScrollPane(listPanel)
+        createTable()
+        val scrollPane = JBScrollPane(pomTable)
         scrollPane.preferredSize = Dimension(1200, 500)
         mainPanel.add(scrollPane, gbc)
 
@@ -441,6 +184,55 @@ class VersionUpdateDialog(
         loadPomFiles()
 
         return mainPanel
+    }
+
+    override fun doOKAction() {
+        val newVersion = versionField.text.trim()
+        if (newVersion.isBlank()) {
+            Messages.showWarningDialog(
+                project,
+                MyBundle.message("version.empty.warning"),
+                MyBundle.message("version.update.title")
+            )
+            return
+        }
+
+        val selectedFiles = pomFileInfoList.filter { it.isSelected }.map { it.xmlFile }
+        if (selectedFiles.isEmpty()) {
+            Messages.showWarningDialog(
+                project,
+                "请至少选择一个POM文件",
+                MyBundle.message("version.update.title")
+            )
+            return
+        }
+
+        val task = object : Task.Backgroundable(project, "正在更新版本...", true) {
+            override fun run(indicator: ProgressIndicator) {
+                var successCount = 0
+
+                selectedFiles.forEachIndexed { index, pomFile ->
+                    indicator.text = "更新文件 ${index + 1}/${selectedFiles.size}"
+                    indicator.fraction = index.toDouble() / selectedFiles.size
+
+                    if (versionService.updateVersion(pomFile, newVersion)) {
+                        successCount++
+                    }
+                }
+
+                ApplicationManager.getApplication().invokeLater {
+                    val message = MyBundle.message("version.update.success", successCount, newVersion)
+                    Messages.showInfoMessage(project, message, MyBundle.message("version.update.title"))
+                    close(OK_EXIT_CODE)
+                }
+            }
+        }
+
+        ProgressManager.getInstance().run(task)
+    }
+
+    override fun getPreferredSize(): Dimension {
+        return Dimension(1200, 600)
     }
 
     /**
@@ -476,41 +268,78 @@ class VersionUpdateDialog(
                     indicator.text = "更新界面..."
                     indicator.fraction = 0.8
 
-                    // 清空当前列表
-                    pomFileCheckboxes.clear()
-                    listPanel.removeAll()
-
-                    // 重新加载项目版本信息面板
-                    loadProjectVersionInfo()
-                    // 重新加载 POM 文件列表
-                    loadPomFiles()
-
-                    // 刷新界面
-                    listPanel.revalidate()
-                    listPanel.repaint()
-                    scrollPane.revalidate()
-                    scrollPane.repaint()
+                    ApplicationManager.getApplication().invokeLater {
+                        // 重新加载项目版本信息面板
+                        loadProjectVersionInfo()
+                        // 重新加载 POM 文件列表
+                        loadPomFiles()
+                    }
 
                     indicator.fraction = 1.0
                     logger.info("数据刷新完成")
 
-                    Messages.showInfoMessage(
-                        project,
-                        "数据刷新完成！\n扫描到 ${refreshedPomFiles.size} 个 POM 文件",
-                        "刷新成功"
-                    )
+                    ApplicationManager.getApplication().invokeLater {
+                        Messages.showInfoMessage(
+                            project,
+                            "数据刷新完成！\n扫描到 ${refreshedPomFiles.size} 个 POM 文件",
+                            "刷新成功"
+                        )
+                    }
                 } catch (e: Exception) {
                     logger.warn("刷新数据时发生错误", e)
-                    Messages.showErrorDialog(
-                        project,
-                        "刷新数据时发生错误: ${e.message}",
-                        "刷新失败"
-                    )
+                    ApplicationManager.getApplication().invokeLater {
+                        Messages.showErrorDialog(
+                            project,
+                            "刷新数据时发生错误: ${e.message}",
+                            "刷新失败"
+                        )
+                    }
                 }
             }
         }
 
         ProgressManager.getInstance().run(task)
+    }
+
+
+    private fun loadProjectVersionInfo() {
+        try {
+            val (groupId, artifactId) = versionService.getParentProjectInfo(pomFiles)
+
+            projectVersionPanel.removeAll()
+            projectVersionPanel.layout = FlowLayout(FlowLayout.LEFT)
+
+            if (groupId != null && artifactId != null) {
+                projectVersionPanel.add(JBLabel("当前项目: $groupId:$artifactId"))
+                projectVersionPanel.add(JBLabel(" | "))
+
+                if (currentProjectVersion.first != null) {
+                    projectVersionPanel.add(JBLabel("Release: ${currentProjectVersion.first}"))
+                } else {
+                    projectVersionPanel.add(JBLabel("Release: 无"))
+                }
+
+                projectVersionPanel.add(JBLabel(" | "))
+
+                if (currentProjectVersion.second != null) {
+                    projectVersionPanel.add(JBLabel("远端 SNAPSHOT: ${currentProjectVersion.second}"))
+                } else {
+                    projectVersionPanel.add(JBLabel("远端 SNAPSHOT: 无"))
+                }
+            } else {
+                projectVersionPanel.add(JBLabel("无法获取当前项目版本信息"))
+            }
+
+            projectVersionPanel.revalidate()
+            projectVersionPanel.repaint()
+
+        } catch (e: Exception) {
+            logger.warn("获取项目版本信息失败", e)
+            projectVersionPanel.removeAll()
+            projectVersionPanel.add(JBLabel("获取项目版本信息失败"))
+            projectVersionPanel.revalidate()
+            projectVersionPanel.repaint()
+        }
     }
 
     private fun createBranchInfoPanel(realBranchName: String?): JPanel {
@@ -538,75 +367,286 @@ class VersionUpdateDialog(
     }
 
     private fun updateSelectAllCheckboxState() {
-        if (pomFileCheckboxes.isEmpty()) return
+        if (pomFileInfoList.isEmpty()) return
 
-        val allSelected = pomFileCheckboxes.all { it.first.isSelected }
-        val noneSelected = pomFileCheckboxes.none { it.first.isSelected }
+        val allSelected = pomFileInfoList.all { it.isSelected }
+        val noneSelected = pomFileInfoList.none { it.isSelected }
 
-        when {
-            allSelected -> {
-                selectAllCheckbox.isSelected = true
-                selectAllCheckbox.text = "全选"
-            }
+        ApplicationManager.getApplication().invokeLater {
+            when {
+                allSelected -> {
+                    selectAllCheckbox.isSelected = true
+                    selectAllCheckbox.text = "全选"
+                }
 
-            noneSelected -> {
-                selectAllCheckbox.isSelected = false
-                selectAllCheckbox.text = "全选"
-            }
+                noneSelected -> {
+                    selectAllCheckbox.isSelected = false
+                    selectAllCheckbox.text = "全选"
+                }
 
-            else -> {
-                selectAllCheckbox.isSelected = false
-                selectAllCheckbox.text = "部分选中"
+                else -> {
+                    selectAllCheckbox.isSelected = false
+                    selectAllCheckbox.text = "部分选中"
+                }
             }
         }
     }
 
-    override fun doOKAction() {
-        val newVersion = versionField.text.trim()
-        if (newVersion.isBlank()) {
-            Messages.showWarningDialog(
-                project,
-                MyBundle.message("version.empty.warning"),
-                MyBundle.message("version.update.title")
+
+    private fun loadPomFiles() {
+        pomFileInfoList.clear()
+
+        pomFiles.forEach { pomFile ->
+            val localVersion = getLocalVersion(pomFile)
+            val pomInfo = PomFileInfo(
+                xmlFile = pomFile,
+                path = pomFile.virtualFile.path,
+                localVersion = localVersion
             )
-            return
+            pomFileInfoList.add(pomInfo)
         }
 
-        val selectedFiles = pomFileCheckboxes.filter { it.first.isSelected }.map { it.second }
-        if (selectedFiles.isEmpty()) {
-            Messages.showWarningDialog(
-                project,
-                "请至少选择一个POM文件",
-                MyBundle.message("version.update.title")
-            )
-            return
+        refreshTable()
+        // 异步加载远端版本信息
+        loadRemoteVersionsAsync()
+    }
+
+    private fun getLocalVersion(pomFile: XmlFile): String {
+        val rootTag = pomFile.rootTag ?: return "未知"
+        val versionTag = versionService.getCurrentVersion(pomFile)
+        return versionTag?.value?.text ?: "未知"
+    }
+
+    private fun createTable() {
+        val columnNames = arrayOf("选择", "POM位置", "本地版本", "远端SNAPSHOT", "远端RELEASE", "操作")
+
+        tableModel = object : DefaultTableModel(columnNames, 0) {
+            override fun isCellEditable(row: Int, column: Int): Boolean {
+                return column == 0 || column == 5 // 选择列和操作列可编辑
+            }
+
+            override fun getColumnClass(columnIndex: Int): Class<*> {
+                return when (columnIndex) {
+                    0 -> Boolean::class.java  // 第一列返回Boolean类型
+                    5 -> JButton::class.java  // 操作按钮列
+                    else -> String::class.java
+                }
+            }
         }
 
-        val task = object : Task.Backgroundable(project, "正在更新版本...", true) {
+        pomTable = JBTable(tableModel)
+        // 改为按比例调整，让POM位置列可以自适应
+        pomTable.autoResizeMode = JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS
+        pomTable.rowHeight = 30
+
+
+        // 设置列宽
+        val columnModel = pomTable.columnModel
+        columnModel.getColumn(0).preferredWidth =10   // 选择
+        columnModel.getColumn(1).preferredWidth = 500
+        columnModel.getColumn(1).minWidth = 200  // 最小宽度
+        columnModel.getColumn(2).preferredWidth = 100  // 本地版本
+        columnModel.getColumn(3).preferredWidth = 100  // 远端SNAPSHOT
+        columnModel.getColumn(4).preferredWidth = 100  // 远端RELEASE
+        columnModel.getColumn(5).preferredWidth = 10   // 操作
+
+        // 设置第一列为复选框渲染器
+        columnModel.getColumn(0).cellRenderer = CheckBoxRenderer()
+        columnModel.getColumn(0).cellEditor = DefaultCellEditor(JCheckBox())
+        // 自定义操作列的渲染器和编辑器
+        columnModel.getColumn(5).cellRenderer = ButtonRenderer()
+        columnModel.getColumn(5).cellEditor = ButtonEditor()
+
+        // 添加选择框变化监听
+        tableModel.addTableModelListener { e ->
+            if (e.column == 0) {
+                val row = e.firstRow
+                if (row >= 0 && row < pomFileInfoList.size) {
+                    pomFileInfoList[row].isSelected = tableModel.getValueAt(row, 0) as Boolean
+                    updateSelectAllCheckboxState()
+                }
+            }
+        }
+    }
+
+    private fun refreshTable() {
+        try {
+            tableModel.rowCount = 0
+            pomFileInfoList.forEach { pomInfo ->
+                tableModel.addRow(
+                    arrayOf(
+                        pomInfo.isSelected,
+                        pomInfo.path,
+                        pomInfo.localVersion,
+                        pomInfo.remoteSnapshot,
+                        pomInfo.remoteRelease,
+                        "检查依赖"
+                    )
+                )
+            }
+            pomTable.revalidate()
+            pomTable.repaint()
+            updateSelectAllCheckboxState()
+        } catch (e: Exception) {
+            logger.warn("刷新表格失败", e)
+        }
+    }
+
+    private fun loadRemoteVersionsAsync() {
+        val task = object : Task.Backgroundable(project, "正在加载远端版本信息...", false) {
             override fun run(indicator: ProgressIndicator) {
-                var successCount = 0
+                // 收集所有需要查询的模块信息
+                val moduleInfoList = mutableListOf<Triple<String, String, Int>>()
 
-                selectedFiles.forEachIndexed { index, pomFile ->
-                    indicator.text = "更新文件 ${index + 1}/${selectedFiles.size}"
-                    indicator.fraction = index.toDouble() / selectedFiles.size
+                pomFileInfoList.forEachIndexed { index, pomInfo ->
+                    val rootTag = pomInfo.xmlFile.rootTag
+                    if (rootTag != null) {
+                        val groupId = rootTag.findFirstSubTag("groupId")?.value?.text
+                            ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
+                        val artifactId = rootTag.findFirstSubTag("artifactId")?.value?.text
 
-                    if (versionService.updateVersion(pomFile, newVersion)) {
-                        successCount++
+                        if (groupId != null && artifactId != null) {
+                            val cacheKey = "$groupId:$artifactId"
+                            if (!versionCache.containsKey(cacheKey)) {
+                                moduleInfoList.add(Triple(groupId, artifactId, index))
+                            } else {
+                                // 使用缓存数据立即更新
+                                val versions = versionCache[cacheKey]!!
+                                pomInfo.remoteRelease = versions.first ?: "无"
+                                pomInfo.remoteSnapshot = versions.second ?: "无"
+                                updateTableRow(index)
+                            }
+                        }
                     }
                 }
 
-                ApplicationManager.getApplication().invokeLater {
-                    val message = MyBundle.message("version.update.success", successCount, newVersion)
-                    Messages.showInfoMessage(project, message, MyBundle.message("version.update.title"))
-                    close(OK_EXIT_CODE)
+                // 并行获取版本信息
+                val futures = moduleInfoList.mapIndexed { taskIndex, (groupId, artifactId, pomIndex) ->
+                    CompletableFuture.supplyAsync {
+                        try {
+                            indicator.text = "正在获取 $groupId:$artifactId 版本信息"
+                            indicator.fraction = taskIndex.toDouble() / moduleInfoList.size
+
+                            val versions = repositoryService.getRemoteVersions(groupId, artifactId, branchType)
+                            val cacheKey = "$groupId:$artifactId"
+                            versionCache[cacheKey] = versions
+
+                            // 更新对应的pomInfo
+                            val pomInfo = pomFileInfoList[pomIndex]
+                            pomInfo.remoteRelease = versions.first ?: "无"
+                            pomInfo.remoteSnapshot = versions.second ?: "无"
+
+                            // 更新表格行
+                            updateTableRow(pomIndex)
+
+                            return@supplyAsync true
+                        } catch (e: Exception) {
+                            logger.warn("获取版本信息失败: $groupId:$artifactId", e)
+                            // 更新为错误状态
+                            val pomInfo = pomFileInfoList[pomIndex]
+                            pomInfo.remoteRelease = "获取失败"
+                            pomInfo.remoteSnapshot = "获取失败"
+                            updateTableRow(pomIndex)
+                            return@supplyAsync false
+                        }
+                    }
+                }
+
+                try {
+                    CompletableFuture.allOf(*futures.toTypedArray())
+                        .get(30, java.util.concurrent.TimeUnit.SECONDS)
+                    logger.info("版本信息获取完成，缓存大小: ${versionCache.size}")
+                } catch (e: Exception) {
+                    logger.warn("获取版本信息超时或失败", e)
                 }
             }
         }
-
         ProgressManager.getInstance().run(task)
     }
 
-    override fun getPreferredSize(): Dimension {
-        return Dimension(800, 500)
+    private fun updateTableRow(rowIndex: Int) {
+        try {
+            if (rowIndex >= 0 && rowIndex < pomFileInfoList.size) {
+                val pomInfo = pomFileInfoList[rowIndex]
+                tableModel.setValueAt(pomInfo.remoteSnapshot, rowIndex, 3)
+                tableModel.setValueAt(pomInfo.remoteRelease, rowIndex, 4)
+            }
+        } catch (e: Exception) {
+            logger.warn("更新表格行失败: $rowIndex", e)
+        }
+    }
+
+    // 复选框渲染器
+    private inner class CheckBoxRenderer : TableCellRenderer {
+        private val checkBox = JCheckBox()
+
+        override fun getTableCellRendererComponent(
+            table: JTable,
+            value: Any?,
+            isSelected: Boolean,
+            hasFocus: Boolean,
+            row: Int,
+            column: Int
+        ): Component {
+            checkBox.isSelected = value as? Boolean ?: false
+            checkBox.horizontalAlignment = SwingConstants.CENTER
+
+            if (isSelected) {
+                checkBox.background = table.selectionBackground
+                checkBox.foreground = table.selectionForeground
+            } else {
+                checkBox.background = table.background
+                checkBox.foreground = table.foreground
+            }
+
+            return checkBox
+        }
+    }
+
+    // 按钮渲染器
+    private inner class ButtonRenderer : JButton(), TableCellRenderer {
+        override fun getTableCellRendererComponent(
+            table: JTable?, value: Any?, isSelected: Boolean,
+            hasFocus: Boolean, row: Int, column: Int
+        ): Component {
+            text = "检查依赖"
+            return this
+        }
+    }
+
+    // 按钮编辑器
+    private inner class ButtonEditor : DefaultCellEditor(JCheckBox()) {
+        private val button = JButton()
+        private var isPushed = false
+        private var currentRow = -1
+
+        init {
+            button.isOpaque = true
+            button.addActionListener { fireEditingStopped() }
+        }
+
+        override fun getTableCellEditorComponent(
+            table: JTable?, value: Any?, isSelected: Boolean, row: Int, column: Int
+        ): Component {
+            currentRow = row
+            isPushed = true
+            button.text = "检查依赖"
+            return button
+        }
+
+        override fun getCellEditorValue(): Any {
+            if (isPushed && currentRow >= 0 && currentRow < pomFileInfoList.size) {
+                val pomInfo = pomFileInfoList[currentRow]
+                val depDialog = DependencyVersionCheckDialog(project, pomInfo.xmlFile, versionService)
+                depDialog.show()
+            }
+            isPushed = false
+            return "检查依赖"
+        }
+
+        override fun stopCellEditing(): Boolean {
+            isPushed = false
+            return super.stopCellEditing()
+        }
     }
 }
