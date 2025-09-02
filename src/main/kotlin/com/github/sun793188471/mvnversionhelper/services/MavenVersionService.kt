@@ -235,9 +235,10 @@ class MavenVersionService(private val project: Project) {
     /**
      * 获取当前项目的 GroupId 和 ArtifactId
      * 优先选择目录结构最外层并且包含 <packaging>pom</packaging> 的 pom 文件
+     * 返回 Pair\<GroupId, ArtifactId\> 以及被选中的 pom 文件
      */
-    fun getParentProjectInfo(pomFiles: List<XmlFile>): Pair<String?, String?> {
-        if (pomFiles.isEmpty()) return Pair(null, null)
+    fun getParentProjectInfo(pomFiles: List<XmlFile>): Triple<String?, String?, XmlFile?> {
+        if (pomFiles.isEmpty()) return Triple(null, null, null)
 
         // 按路径深度排序所有 pom 文件（路径越短，越靠外层）
         val sortedPomFiles = pomFiles.sortedBy { it.virtualFile.path.count { c -> c == '/' } }
@@ -249,13 +250,13 @@ class MavenVersionService(private val project: Project) {
             packagingTag?.value?.text == "pom"
         } ?: sortedPomFiles.first() // 如果没找到符合条件的，就用最外层的 pom 文件
 
-        val rootTag = rootPomFile.rootTag ?: return Pair(null, null)
+        val rootTag = rootPomFile.rootTag ?: return Triple(null, null, rootPomFile)
 
         val groupId = rootTag.findFirstSubTag("groupId")?.value?.text
             ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
         val artifactId = rootTag.findFirstSubTag("artifactId")?.value?.text
 
-        return Pair(groupId, artifactId)
+        return Triple(groupId, artifactId, rootPomFile)
     }
 
     /**

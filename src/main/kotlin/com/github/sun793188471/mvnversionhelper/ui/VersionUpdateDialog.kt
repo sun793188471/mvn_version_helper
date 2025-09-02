@@ -43,6 +43,7 @@ class VersionUpdateDialog(
     private val realBranchName = versionService.getRealBranchName()
     private val branchType = versionService.getBranchType(realBranchName)
     private val currentProjectVersion = versionService.getCurrentProjectRemoteVersions(branchType, pomFiles)
+    private var parentFile: XmlFile? = null
 
     // 用于缓存版本信息，避免重复请求
     private val versionCache = ConcurrentHashMap<String, Pair<String?, String?>>()
@@ -220,11 +221,9 @@ class VersionUpdateDialog(
                     }
                 }
 
-                ApplicationManager.getApplication().invokeLater {
-                    val message = MyBundle.message("version.update.success", successCount, newVersion)
-                    Messages.showInfoMessage(project, message, MyBundle.message("version.update.title"))
-                    close(OK_EXIT_CODE)
-                }
+                val message = MyBundle.message("version.update.success", successCount, newVersion)
+                Messages.showInfoMessage(project, message, MyBundle.message("version.update.title"))
+                close(OK_EXIT_CODE)
             }
         }
 
@@ -268,32 +267,26 @@ class VersionUpdateDialog(
                     indicator.text = "更新界面..."
                     indicator.fraction = 0.8
 
-                    ApplicationManager.getApplication().invokeLater {
-                        // 重新加载项目版本信息面板
-                        loadProjectVersionInfo()
-                        // 重新加载 POM 文件列表
-                        loadPomFiles()
-                    }
+                    // 重新加载项目版本信息面板
+                    loadProjectVersionInfo()
+                    // 重新加载 POM 文件列表
+                    loadPomFiles()
 
                     indicator.fraction = 1.0
                     logger.info("数据刷新完成")
 
-                    ApplicationManager.getApplication().invokeLater {
-                        Messages.showInfoMessage(
-                            project,
-                            "数据刷新完成！\n扫描到 ${refreshedPomFiles.size} 个 POM 文件",
-                            "刷新成功"
-                        )
-                    }
+                    Messages.showInfoMessage(
+                        project,
+                        "数据刷新完成！\n扫描到 ${refreshedPomFiles.size} 个 POM 文件",
+                        "刷新成功"
+                    )
                 } catch (e: Exception) {
                     logger.warn("刷新数据时发生错误", e)
-                    ApplicationManager.getApplication().invokeLater {
-                        Messages.showErrorDialog(
-                            project,
-                            "刷新数据时发生错误: ${e.message}",
-                            "刷新失败"
-                        )
-                    }
+                    Messages.showErrorDialog(
+                        project,
+                        "刷新数据时发生错误: ${e.message}",
+                        "刷新失败"
+                    )
                 }
             }
         }
@@ -304,8 +297,8 @@ class VersionUpdateDialog(
 
     private fun loadProjectVersionInfo() {
         try {
-            val (groupId, artifactId) = versionService.getParentProjectInfo(pomFiles)
-
+            val (groupId, artifactId, parent) = versionService.getParentProjectInfo(pomFiles)
+            parentFile = parent
             projectVersionPanel.removeAll()
             projectVersionPanel.layout = FlowLayout(FlowLayout.LEFT)
 
@@ -442,7 +435,7 @@ class VersionUpdateDialog(
 
         // 设置列宽
         val columnModel = pomTable.columnModel
-        columnModel.getColumn(0).preferredWidth =10   // 选择
+        columnModel.getColumn(0).preferredWidth = 10   // 选择
         columnModel.getColumn(1).preferredWidth = 500
         columnModel.getColumn(1).minWidth = 200  // 最小宽度
         columnModel.getColumn(2).preferredWidth = 100  // 本地版本
@@ -497,7 +490,6 @@ class VersionUpdateDialog(
             override fun run(indicator: ProgressIndicator) {
                 // 收集所有需要查询的模块信息
                 val moduleInfoList = mutableListOf<Triple<String, String, Int>>()
-
                 pomFileInfoList.forEachIndexed { index, pomInfo ->
                     val rootTag = pomInfo.xmlFile.rootTag
                     if (rootTag != null) {
@@ -637,7 +629,7 @@ class VersionUpdateDialog(
         override fun getCellEditorValue(): Any {
             if (isPushed && currentRow >= 0 && currentRow < pomFileInfoList.size) {
                 val pomInfo = pomFileInfoList[currentRow]
-                val depDialog = DependencyVersionCheckDialog(project, pomInfo.xmlFile, versionService)
+                val depDialog = DependencyVersionCheckDialog(project, pomInfo.xmlFile, parentFile, versionService)
                 depDialog.show()
             }
             isPushed = false
