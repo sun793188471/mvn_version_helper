@@ -19,10 +19,15 @@ import com.intellij.ui.table.JBTable
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JTable
 import javax.swing.table.DefaultTableModel
+import kotlin.collections.get
 
 class DependencyVersionCheckDialog(
     private val project: Project,
@@ -63,39 +68,7 @@ class DependencyVersionCheckDialog(
     override fun createCenterPanel(): JComponent {
         val mainPanel = JPanel(BorderLayout())
 
-        // 顶部控制面板
-        val controlPanel = JPanel(FlowLayout(FlowLayout.LEFT))
-        controlPanel.add(JBLabel("依赖列表:"))
-
-        selectSnapshotCheckbox = JBCheckBox("全选 SNAPSHOT 版本")
-        selectSnapshotCheckbox.addActionListener {
-            val selected = selectSnapshotCheckbox.isSelected
-            dependencies.forEach { dep ->
-                if (dep.latestSnapshot != null) {
-                    dep.selectSnapshot = selected
-                    if (selected) dep.selectRelease = false
-                }
-            }
-            refreshTable()
-        }
-        controlPanel.add(selectSnapshotCheckbox)
-
-        selectReleaseCheckbox = JBCheckBox("全选 RELEASE 版本")
-        selectReleaseCheckbox.addActionListener {
-            val selected = selectReleaseCheckbox.isSelected
-            dependencies.forEach { dep ->
-                if (dep.latestRelease != null) {
-                    dep.selectRelease = selected
-                    if (selected) dep.selectSnapshot = false
-                }
-            }
-            refreshTable()
-        }
-        controlPanel.add(selectReleaseCheckbox)
-
-        mainPanel.add(controlPanel, BorderLayout.NORTH)
-
-        // 表格
+        // 删除整个控制面板，直接显示表格
         createTable()
         val scrollPane = JBScrollPane(dependencyTable)
         scrollPane.preferredSize = Dimension(750, 350)
@@ -106,63 +79,55 @@ class DependencyVersionCheckDialog(
 
     private fun createTable() {
         val columnNames = arrayOf(
-            "GroupId", "ArtifactId", "当前版本",
-            "最新 SNAPSHOT", "选择 SNAPSHOT",
-            "最新 RELEASE", "选择 RELEASE"
+            "依赖",
+            "当前版本",
+            "最新SNAPSHOT",
+            "最新RELEASE",
+            "修改版本号"  // 新增列
         )
 
         tableModel = object : DefaultTableModel(columnNames, 0) {
             override fun isCellEditable(row: Int, column: Int): Boolean {
-                return column == 4 || column == 6 // 只有选择列可编辑
+                return column == 4  // 只有修改版本号列可编辑
             }
 
             override fun getColumnClass(columnIndex: Int): Class<*> {
-                return when (columnIndex) {
-                    4, 6 -> Boolean::class.java
-                    else -> String::class.java
-                }
+                return String::class.java
             }
         }
 
         dependencyTable = JBTable(tableModel)
-        dependencyTable.autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
-
+        dependencyTable.autoResizeMode = JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS
+        dependencyTable.rowHeight = 30
+        // 设置列宽
         // 设置列宽
         val columnModel = dependencyTable.columnModel
-        columnModel.getColumn(0).preferredWidth = 150  // GroupId
-        columnModel.getColumn(1).preferredWidth = 120  // ArtifactId
-        columnModel.getColumn(2).preferredWidth = 80   // 当前版本
-        columnModel.getColumn(3).preferredWidth = 100  // SNAPSHOT
-        columnModel.getColumn(4).preferredWidth = 60   // 选择 SNAPSHOT
-        columnModel.getColumn(5).preferredWidth = 100  // RELEASE
-        columnModel.getColumn(6).preferredWidth = 60   // 选择 RELEASE
-
-        // 添加复选框点击事件
-        tableModel.addTableModelListener { e ->
-            if (e.column == 4 || e.column == 6) {
-                val row = e.firstRow
-                if (row >= 0 && row < dependencies.size) {
-                    val dep = dependencies[row]
-                    when (e.column) {
-                        4 -> { // SNAPSHOT 选择
-                            dep.selectSnapshot = tableModel.getValueAt(row, 4) as Boolean
-                            if (dep.selectSnapshot) {
-                                dep.selectRelease = false
-                                tableModel.setValueAt(false, row, 6)
-                            }
-                        }
-
-                        6 -> { // RELEASE 选择
-                            dep.selectRelease = tableModel.getValueAt(row, 6) as Boolean
-                            if (dep.selectRelease) {
-                                dep.selectSnapshot = false
-                                tableModel.setValueAt(false, row, 4)
-                            }
+        columnModel.getColumn(0).preferredWidth = 300
+        columnModel.getColumn(1).preferredWidth = 150
+        columnModel.getColumn(2).preferredWidth = 150
+        columnModel.getColumn(3).preferredWidth = 150
+        columnModel.getColumn(4).preferredWidth = 200  // 修改版本号列
+        // 添加双击事件监听器
+        dependencyTable.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount == 2) {
+                    val row = dependencyTable.rowAtPoint(e.point)
+                    val col = dependencyTable.columnAtPoint(e.point)
+                    if (row >= 0 && col >= 0) {
+                        val value = dependencyTable.getValueAt(row, col)?.toString() ?: ""
+                        if (value.isNotEmpty()) {
+                            copyToClipboard(value)
                         }
                     }
                 }
             }
-        }
+        })
+    }
+
+    private fun copyToClipboard(text: String) {
+        val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+        val selection = StringSelection(text)
+        clipboard.setContents(selection, selection)
     }
 
     private fun loadDependencies() {
@@ -354,16 +319,14 @@ class DependencyVersionCheckDialog(
     private fun refreshTable() {
         try {
             tableModel.rowCount = 0
-            dependencies.forEach { dep ->
+            dependencies.forEach { depInfo ->
                 tableModel.addRow(
                     arrayOf(
-                        dep.groupId,
-                        dep.artifactId,
-                        dep.currentVersion ?: "未知",
-                        dep.latestSnapshot ?: "无",
-                        dep.selectSnapshot,
-                        dep.latestRelease ?: "无",
-                        dep.selectRelease
+                        "${depInfo.groupId}:${depInfo.artifactId}",
+                        depInfo.currentVersion,
+                        depInfo.latestSnapshot ?: "无",
+                        depInfo.latestRelease ?: "无",
+                        depInfo.currentVersion  // 默认显示当前版本，用户可编辑
                     )
                 )
             }
@@ -375,14 +338,21 @@ class DependencyVersionCheckDialog(
     }
 
     override fun doOKAction() {
-        val selectedDependencies = dependencies.filter {
-            it.selectSnapshot || it.selectRelease
-        }
+        // 收集修改版本号列有变更的依赖
+        val changedDependencies = mutableListOf<Triple<DependencyInfo, String, String>>()
+        for (i in 0 until tableModel.rowCount) {
+            val originalDep = dependencies[i]
+            val newVersion = tableModel.getValueAt(i, 4) as String
+            val currentVersion = originalDep.currentVersion ?: ""
 
-        if (selectedDependencies.isEmpty()) {
+            if (newVersion != currentVersion && newVersion.isNotBlank()) {
+                changedDependencies.add(Triple(originalDep, currentVersion, newVersion))
+            }
+        }
+        if (changedDependencies.isEmpty()) {
             Messages.showWarningDialog(
                 project,
-                "请至少选择一个依赖进行更新",
+                "没有检测到版本变更",
                 "依赖版本更新"
             )
             return
@@ -393,24 +363,16 @@ class DependencyVersionCheckDialog(
                 var updateCount = 0
                 val failedUpdates = mutableListOf<String>()
 
-                selectedDependencies.forEachIndexed { index, dep ->
+                changedDependencies.forEachIndexed { index, (dep, oldVersion, newVersion) ->
                     if (indicator.isCanceled) return
 
                     indicator.text = "更新 ${dep.groupId}:${dep.artifactId}"
-                    indicator.fraction = index.toDouble() / selectedDependencies.size
+                    indicator.fraction = index.toDouble() / changedDependencies.size
 
-                    val newVersion = when {
-                        dep.selectSnapshot -> dep.latestSnapshot
-                        dep.selectRelease -> dep.latestRelease
-                        else -> null
-                    }
-
-                    if (newVersion != null) {
-                        if (updateDependencyVersion(dep.groupId, dep.artifactId, newVersion)) {
-                            updateCount++
-                        } else {
-                            failedUpdates.add("${dep.groupId}:${dep.artifactId}")
-                        }
+                    if (updateDependencyVersion(dep.groupId, dep.artifactId, newVersion)) {
+                        updateCount++
+                    } else {
+                        failedUpdates.add("${dep.groupId}:${dep.artifactId}")
                     }
                 }
 
