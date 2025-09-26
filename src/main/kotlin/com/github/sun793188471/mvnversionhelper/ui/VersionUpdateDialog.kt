@@ -210,12 +210,12 @@ class VersionUpdateDialog(
         val selectedFiles = pomFileInfoList.filter { it.isSelected }.map { it.xmlFile }
         if (selectedFiles.isEmpty()) {
             ApplicationManager.getApplication().invokeLater {
-            Messages.showWarningDialog(
-                project,
-                "请至少选择一个POM文件",
-                MyBundle.message("version.update.title")
-            )
-}
+                Messages.showWarningDialog(
+                    project,
+                    "请至少选择一个POM文件",
+                    MyBundle.message("version.update.title")
+                )
+            }
             return
         }
 
@@ -657,7 +657,9 @@ class VersionUpdateDialog(
         override fun getCellEditorValue(): Any {
             if (isPushed && currentRow >= 0 && currentRow < pomFileInfoList.size) {
                 val pomInfo = pomFileInfoList[currentRow]
-                val depDialog = DependencyVersionCheckDialog(project, pomInfo.xmlFile, parentFile, versionService)
+                val depDialog = DependencyVersionCheckDialog(
+                    project, pomInfo.xmlFile, parentFile, versionService, branchType
+                )
                 depDialog.show()
             }
             isPushed = false

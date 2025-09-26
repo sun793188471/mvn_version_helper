@@ -15,7 +15,6 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.psi.xml.XmlFile
 import com.intellij.psi.xml.XmlTag
-import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
 import java.awt.BorderLayout
@@ -33,7 +32,8 @@ class DependencyVersionCheckDialog(
     private val project: Project,
     private val pomFile: XmlFile,
     private val parentPomFile: XmlFile?,
-    private val versionService: MavenVersionService
+    private val versionService: MavenVersionService,
+    private val branchType: MavenVersionService.BranchType
 ) : DialogWrapper(project) {
 
     private val repositoryService = MavenRepositoryService.getInstance(project)
@@ -41,8 +41,6 @@ class DependencyVersionCheckDialog(
 
     private lateinit var dependencyTable: JBTable
     private lateinit var tableModel: DefaultTableModel
-    private lateinit var selectSnapshotCheckbox: JBCheckBox
-    private lateinit var selectReleaseCheckbox: JBCheckBox
 
     private val dependencies = mutableListOf<DependencyInfo>()
     private val logger = Logger.getInstance(DependencyVersionCheckDialog::class.java)
@@ -131,117 +129,128 @@ class DependencyVersionCheckDialog(
     }
 
     private fun loadDependencies() {
+
         val task = object : Task.Backgroundable(project, "正在检查依赖版本...", true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
 
-                val rootTag = pomFile.rootTag ?: return
-                val dependenciesTag = rootTag.findFirstSubTag("dependencies") ?: return
-                val dependencyTags = dependenciesTag.findSubTags("dependency")
+                val tempDependencies = compute<MutableList<DependencyInfo>?, Throwable> {
+                    val rootTag = pomFile.rootTag ?: return@compute null
+                    val dependenciesTag = rootTag.findFirstSubTag("dependencies") ?: return@compute mutableListOf()
 
-                val groupIdPrefixes = settings.getGroupIdPrefixes()
-                val tempDependencies = mutableListOf<DependencyInfo>()
-
-                // 解析当前POM中的dependencyManagement 和 properties
-                val parentDependencyManagement = parseAllDependencyManagement(pomFile, parentPomFile)
-                val properties = parseAllProperties(pomFile, parentPomFile)
-
-                dependencyTags.forEachIndexed { index, depTag ->
-                    if (indicator.isCanceled) return
-                    val groupId = compute<String?, Throwable> {
-                        depTag.findFirstSubTag("groupId")?.value?.text
-                    }
-                    val artifactId = compute<String?, Throwable> {
-                        depTag.findFirstSubTag("artifactId")?.value?.text
-                    }
-                    val versionTag = compute<XmlTag, Throwable> {
-                        depTag.findFirstSubTag("version")
+                    val dependencyTags = dependenciesTag.findSubTags("dependency")
+                    if (dependencyTags.isEmpty()) {
+                        return@compute mutableListOf()
                     }
 
-                    if (groupId != null && artifactId != null &&
-                        (groupIdPrefixes.isEmpty() || groupIdPrefixes.any { prefix -> groupId.startsWith(prefix) })
-                    ) {
-                        indicator.text = "检查 $groupId:$artifactId"
-                        indicator.fraction = index.toDouble() / dependencyTags.size
-                        // 真正的版本号存储的POM文件位置
-                        var realPomFile: XmlFile?
-                        // 版本号类型
-                        var realLocationType: VersionLocationType?
-                        // 最终版本号
-                        var realVersion: String?
-                        //  properties key
-                        var realPropertieKey: String? = null
-                        // 从当前POM的dependencies中解析版本号
-                        var version = compute<String?, Throwable> {
-                            versionTag?.value?.text
-                        }
-                        // 不为空，代表是在当前POM中定义的，并且不是占位符
-                        if (version != null && !(version.startsWith("\${") && version.endsWith("}"))) {
-                            realVersion = version
-                            realPomFile = pomFile
-                            realLocationType = VersionLocationType.DEPENDENCY_DIRECT
-                        } else if (version != null && (version.startsWith("\${") && version.endsWith("}"))) {
-                            // 版本号不为空，但是版本号是占位符
-                            // 获取当前项目和父项目中的 dependencyManagement
-                            val managedDep = parentDependencyManagement["$groupId:$artifactId"]
-                            // 解析版本号中的占位符，获取真正的版本号和存储POM文件位置
-                            val resolvedVersion = resolveVersionPlaceholder(version, properties, managedDep)
-                            realVersion = resolvedVersion.first
-                            // 如果解析出来的版本号为空，并且版本号不是占位符，说明是直接在 dependencyManagement 中定义的
-                            realPomFile = resolvedVersion.second
-                            realPropertieKey = resolvedVersion.third
-                            realLocationType =
-                                if (realPropertieKey != null) {
-                                    VersionLocationType.PROPERTY
-                                } else {
-                                    VersionLocationType.DEPENDENCY_MANAGEMENT
-                                }
-                        } else {
-                            // 当前依赖的版本号为空，从 dependencyManagement 中查找
-                            val managedDep = parentDependencyManagement["$groupId:$artifactId"]
-                            version = managedDep?.version
-                            // 解析版本号中的占位符，获取真正的版本号和存储POM文件位置
-                            val resolvedVersion = resolveVersionPlaceholder(version, properties, managedDep)
-                            // 如果解析出来的版本号为空，并且版本号不是占位符，说明是直接在 dependencyManagement 中定义的
-                            realPomFile = managedDep?.dependencyPomFile
-                            realVersion = resolvedVersion.first
-                            realPropertieKey = resolvedVersion.third
-                            realLocationType =
-                                if (realPropertieKey != null) {
-                                    VersionLocationType.PROPERTY
-                                } else {
-                                    VersionLocationType.DEPENDENCY_MANAGEMENT
-                                }
-                        }
+                    val groupIdPrefixes = settings.getGroupIdPrefixes()
+                    val localTempDependencies = mutableListOf<DependencyInfo>()
 
-                        try {
-                            val (latestRelease, latestSnapshot) = repositoryService.getRemoteVersions(
-                                groupId,
-                                artifactId
-                            )
-                            tempDependencies.add(
-                                DependencyInfo(
-                                    groupId = groupId,
-                                    artifactId = artifactId,
-                                    currentVersion = realVersion,
-                                    latestSnapshot = latestSnapshot,
-                                    latestRelease = latestRelease,
-                                    versionLocation = VersionLocation(realLocationType, realPropertieKey, realPomFile)
+                    // 解析当前POM中的dependencyManagement 和 properties
+                    val parentDependencyManagement = parseAllDependencyManagement(pomFile, parentPomFile)
+                    val properties = parseAllProperties(pomFile, parentPomFile)
+
+                    dependencyTags.forEachIndexed { index, depTag ->
+                        if (indicator.isCanceled) return@compute localTempDependencies
+                        val groupId = depTag.findFirstSubTag("groupId")?.value?.text
+                        val artifactId = depTag.findFirstSubTag("artifactId")?.value?.text
+                        val versionTag = depTag.findFirstSubTag("version")
+
+                        if (groupId != null && artifactId != null &&
+                            (groupIdPrefixes.isEmpty() || groupIdPrefixes.any { prefix -> groupId.startsWith(prefix) })
+                        ) {
+                            indicator.text = "检查 $groupId:$artifactId"
+                            indicator.fraction = index.toDouble() / maxOf(1, dependencyTags.size)
+
+                            // 真正的版本号存储的POM文件位置
+                            var realPomFile: XmlFile?
+                            // 版本号类型
+                            var realLocationType: VersionLocationType?
+                            // 最终版本号
+                            var realVersion: String?
+                            //  properties key
+                            var realPropertieKey: String? = null
+                            // 从当前POM的dependencies中解析版本号
+                            var version = compute<String?, Throwable> {
+                                versionTag?.value?.text
+                            }
+                            // 不为空，代表是在当前POM中定义的，并且不是占位符
+                            if (version != null && !(version.startsWith("\${") && version.endsWith("}"))) {
+                                realVersion = version
+                                realPomFile = pomFile
+                                realLocationType = VersionLocationType.DEPENDENCY_DIRECT
+                            } else if (version != null && (version.startsWith("\${") && version.endsWith("}"))) {
+                                // 版本号不为空，但是版本号是占位符
+                                // 获取当前项目和父项目中的 dependencyManagement
+                                val managedDep = parentDependencyManagement["$groupId:$artifactId"]
+                                // 解析版本号中的占位符，获取真正的版本号和存储POM文件位置
+                                val resolvedVersion = resolveVersionPlaceholder(version, properties, managedDep)
+                                realVersion = resolvedVersion.first
+                                // 如果解析出来的版本号为空，并且版本号不是占位符，说明是直接在 dependencyManagement 中定义的
+                                realPomFile = resolvedVersion.second
+                                realPropertieKey = resolvedVersion.third
+                                realLocationType =
+                                    if (realPropertieKey != null) {
+                                        VersionLocationType.PROPERTY
+                                    } else {
+                                        VersionLocationType.DEPENDENCY_MANAGEMENT
+                                    }
+                            } else {
+                                // 当前依赖的版本号为空，从 dependencyManagement 中查找
+                                val managedDep = parentDependencyManagement["$groupId:$artifactId"]
+                                version = managedDep?.version
+                                // 解析版本号中的占位符，获取真正的版本号和存储POM文件位置
+                                val resolvedVersion = resolveVersionPlaceholder(version, properties, managedDep)
+                                // 如果解析出来的版本号为空，并且版本号不是占位符，说明是直接在 dependencyManagement 中定义的
+                                realPomFile = managedDep?.dependencyPomFile
+                                realVersion = resolvedVersion.first
+                                realPropertieKey = resolvedVersion.third
+                                realLocationType =
+                                    if (realPropertieKey != null) {
+                                        VersionLocationType.PROPERTY
+                                    } else {
+                                        VersionLocationType.DEPENDENCY_MANAGEMENT
+                                    }
+                            }
+
+                            try {
+                                val (latestRelease, latestSnapshot) = repositoryService.getRemoteVersions(
+                                    groupId,
+                                    artifactId,
+                                    branchType
                                 )
-                            )
-                        } catch (e: Exception) {
-                            // 忽略获取失败的依赖
+                                localTempDependencies.add(
+                                    DependencyInfo(
+                                        groupId = groupId,
+                                        artifactId = artifactId,
+                                        currentVersion = realVersion,
+                                        latestSnapshot = latestSnapshot,
+                                        latestRelease = latestRelease,
+                                        versionLocation = VersionLocation(
+                                            realLocationType,
+                                            realPropertieKey,
+                                            realPomFile
+                                        )
+                                    )
+                                )
+                            } catch (e: Exception) {
+                                logger.warn("获取远程版本失败: $groupId:$artifactId", e)
+                            }
                         }
                     }
+                    localTempDependencies
                 }
 
                 dependencies.clear()
-                dependencies.addAll(tempDependencies)
+                if (tempDependencies != null) {
+                    dependencies.addAll(tempDependencies)
+                }
                 refreshTable()
             }
         }
 
         ProgressManager.getInstance().run(task)
+
     }
 
     private data class ManagedDependency(
