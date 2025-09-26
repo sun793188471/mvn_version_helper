@@ -13,6 +13,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.psi.xml.XmlFile
+import com.intellij.psi.xml.XmlTag
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
@@ -98,11 +99,13 @@ class VersionUpdateDialog(
             if (recommendedVersion != null) {
                 versionField.text = recommendedVersion
             } else {
-                Messages.showWarningDialog(
-                    project,
-                    "无法自动推荐版本号，请检查当前分支和远端版本信息",
-                    "智能推荐"
-                )
+                ApplicationManager.getApplication().invokeLater {
+                    Messages.showWarningDialog(
+                        project,
+                        "无法自动推荐版本号，请检查当前分支和远端版本信息",
+                        "智能推荐"
+                    )
+                }
             }
         }
         inputPanel.add(recommendButton)
@@ -114,11 +117,13 @@ class VersionUpdateDialog(
             if (releaseVersion != null) {
                 versionField.text = releaseVersion
             } else {
-                Messages.showWarningDialog(
-                    project,
-                    "无法获取远端RELEASE版本",
-                    "版本选择"
-                )
+                ApplicationManager.getApplication().invokeLater {
+                    Messages.showWarningDialog(
+                        project,
+                        "无法获取远端RELEASE版本",
+                        "版本选择"
+                    )
+                }
             }
         }
         inputPanel.add(latestReleaseButton)
@@ -130,11 +135,13 @@ class VersionUpdateDialog(
             if (snapshotVersion != null) {
                 versionField.text = snapshotVersion
             } else {
-                Messages.showWarningDialog(
-                    project,
-                    "无法获取远端SNAPSHOT版本",
-                    "版本选择"
-                )
+                ApplicationManager.getApplication().invokeLater {
+                    Messages.showWarningDialog(
+                        project,
+                        "无法获取远端SNAPSHOT版本",
+                        "版本选择"
+                    )
+                }
             }
         }
         inputPanel.add(latestSnapshotButton)
@@ -190,21 +197,25 @@ class VersionUpdateDialog(
     override fun doOKAction() {
         val newVersion = versionField.text.trim()
         if (newVersion.isBlank()) {
-            Messages.showWarningDialog(
-                project,
-                MyBundle.message("version.empty.warning"),
-                MyBundle.message("version.update.title")
-            )
+            ApplicationManager.getApplication().invokeLater {
+                Messages.showWarningDialog(
+                    project,
+                    MyBundle.message("version.empty.warning"),
+                    MyBundle.message("version.update.title")
+                )
+            }
             return
         }
 
         val selectedFiles = pomFileInfoList.filter { it.isSelected }.map { it.xmlFile }
         if (selectedFiles.isEmpty()) {
+            ApplicationManager.getApplication().invokeLater {
             Messages.showWarningDialog(
                 project,
                 "请至少选择一个POM文件",
                 MyBundle.message("version.update.title")
             )
+}
             return
         }
 
@@ -222,8 +233,10 @@ class VersionUpdateDialog(
                 }
 
                 val message = MyBundle.message("version.update.success", successCount, newVersion)
-                Messages.showInfoMessage(project, message, MyBundle.message("version.update.title"))
-                close(OK_EXIT_CODE)
+                ApplicationManager.getApplication().invokeLater {
+                    Messages.showInfoMessage(project, message, MyBundle.message("version.update.title"))
+                    close(OK_EXIT_CODE)
+                }
             }
         }
 
@@ -275,18 +288,22 @@ class VersionUpdateDialog(
                     indicator.fraction = 1.0
                     logger.info("数据刷新完成")
 
-                    Messages.showInfoMessage(
-                        project,
-                        "数据刷新完成！\n扫描到 ${refreshedPomFiles.size} 个 POM 文件",
-                        "刷新成功"
-                    )
+                    ApplicationManager.getApplication().invokeLater {
+                        Messages.showInfoMessage(
+                            project,
+                            "数据刷新完成！\n扫描到 ${refreshedPomFiles.size} 个 POM 文件",
+                            "刷新成功"
+                        )
+                    }
                 } catch (e: Exception) {
                     logger.warn("刷新数据时发生错误", e)
-                    Messages.showErrorDialog(
-                        project,
-                        "刷新数据时发生错误: ${e.message}",
-                        "刷新失败"
-                    )
+                    ApplicationManager.getApplication().invokeLater {
+                        Messages.showErrorDialog(
+                            project,
+                            "刷新数据时发生错误: ${e.message}",
+                            "刷新失败"
+                        )
+                    }
                 }
             }
         }
@@ -491,11 +508,18 @@ class VersionUpdateDialog(
                 // 收集所有需要查询的模块信息
                 val moduleInfoList = mutableListOf<Triple<String, String, Int>>()
                 pomFileInfoList.forEachIndexed { index, pomInfo ->
-                    val rootTag = pomInfo.xmlFile.rootTag
+                    val rootTag = com.intellij.openapi.application.ReadAction.compute<XmlTag?, Throwable> {
+                        pomInfo.xmlFile.rootTag
+                    }
                     if (rootTag != null) {
-                        val groupId = rootTag.findFirstSubTag("groupId")?.value?.text
-                            ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
-                        val artifactId = rootTag.findFirstSubTag("artifactId")?.value?.text
+                        val groupId = com.intellij.openapi.application.ReadAction.compute<String?, Throwable> {
+                            rootTag.findFirstSubTag("groupId")?.value?.text
+                                ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
+                        }
+                        val artifactId = com.intellij.openapi.application.ReadAction.compute<String?, Throwable> {
+                            rootTag.findFirstSubTag("artifactId")?.value?.text
+                        }
+
 
                         if (groupId != null && artifactId != null) {
                             val cacheKey = "$groupId:$artifactId"

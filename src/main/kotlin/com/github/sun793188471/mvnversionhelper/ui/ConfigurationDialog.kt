@@ -1,6 +1,7 @@
 package com.github.sun793188471.mvnversionhelper.ui
 
 import com.github.sun793188471.mvnversionhelper.settings.MavenVersionHelperSettings
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
@@ -48,6 +49,7 @@ class ConfigurationDialog(
 
         return mainPanel
     }
+
     private fun createExcludePathPanel(): JComponent {
         val panel = JPanel(BorderLayout())
         // 标题和说明
@@ -94,9 +96,11 @@ class ConfigurationDialog(
                     excludePathsListModel.addElement(newPath)
                     newPathField.text = ""
                 } else {
-                    Messages.showWarningDialog(
-                        project, "路径 '$newPath' 已存在", "重复路径"
-                    )
+                    ApplicationManager.getApplication().invokeLater {
+                        Messages.showWarningDialog(
+                            project, "路径 '$newPath' 已存在", "重复路径"
+                        )
+                    }
                 }
             }
         }
@@ -146,11 +150,11 @@ class ConfigurationDialog(
 
         // 保存GroupId前缀配置
         settings.setGroupIdPrefix(groupIdPrefixField.text.trim())
-
-        Messages.showInfoMessage(
-            project, "配置已保存", "保存成功"
-        )
-
+        ApplicationManager.getApplication().invokeLater {
+            Messages.showInfoMessage(
+                project, "配置已保存", "保存成功"
+            )
+        }
         super.doOKAction()
     }
 

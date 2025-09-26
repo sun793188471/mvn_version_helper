@@ -5,6 +5,8 @@ import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiManager
 import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
@@ -25,10 +27,13 @@ class MavenVersionService(private val project: Project) {
         val basePath = project.basePath ?: ""
 
         // 查找所有pom.xml文件
-        val virtualFiles = FilenameIndex.getVirtualFilesByName(
-            "pom.xml",
-            GlobalSearchScope.projectScope(project)
-        )
+        val virtualFiles = com.intellij.openapi.application.ReadAction.compute<Collection<VirtualFile>, Throwable> {
+            FilenameIndex.getVirtualFilesByName(
+                "pom.xml",
+                GlobalSearchScope.projectScope(project)
+            )
+        }
+
 
         virtualFiles.forEach { virtualFile ->
             val relativePath = virtualFile.path.removePrefix(basePath)
@@ -39,7 +44,9 @@ class MavenVersionService(private val project: Project) {
             }
 
             if (!shouldExclude) {
-                val psiFile = psiManager.findFile(virtualFile)
+                val psiFile = com.intellij.openapi.application.ReadAction.compute<PsiFile?, Throwable> {
+                    psiManager.findFile(virtualFile)
+                }
                 if (psiFile is XmlFile) {
                     pomFiles.add(psiFile)
                 }
@@ -176,12 +183,17 @@ class MavenVersionService(private val project: Project) {
     /**
      * 更新指定依赖的版本
      */
-    fun updateDependencyVersion(pomFile: XmlFile, groupId: String, artifactId: String, newVersion: String): Boolean {
+    fun updateDependencyVersion(
+        updatePomFile: XmlFile,
+        groupId: String,
+        artifactId: String,
+        newVersion: String
+    ): Boolean {
         return try {
             var updated = false
 
             WriteCommandAction.runWriteCommandAction(project) {
-                val rootTag = pomFile.rootTag ?: return@runWriteCommandAction
+                val rootTag = updatePomFile.rootTag ?: return@runWriteCommandAction
                 val dependenciesTag = rootTag.findFirstSubTag("dependencies") ?: return@runWriteCommandAction
                 val dependencyTags = dependenciesTag.findSubTags("dependency")
 
@@ -209,7 +221,10 @@ class MavenVersionService(private val project: Project) {
     /**
      * 获取当前项目的远端版本信息
      */
-    fun getCurrentProjectRemoteVersions(branchType: BranchType? = null, pomFiles: List<XmlFile>): Pair<String?, String?> {
+    fun getCurrentProjectRemoteVersions(
+        branchType: BranchType? = null,
+        pomFiles: List<XmlFile>
+    ): Pair<String?, String?> {
         if (pomFiles.isEmpty()) return Pair(null, null)
 
         val mainPomFile = pomFiles.first()
