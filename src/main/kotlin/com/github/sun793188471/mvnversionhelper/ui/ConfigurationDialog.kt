@@ -18,10 +18,16 @@ class ConfigurationDialog(
     private val project: Project
 ) : DialogWrapper(project) {
 
+    // 需要排除的不需要检查的路径
     private val excludePathsListModel = DefaultListModel<String>()
     private val excludePathsList = JBList(excludePathsListModel)
     private val newPathField = JBTextField(30)
-    private val groupIdPrefixField = JBTextField(20)
+
+    // 需要依赖检查的路径前缀
+    private val groupIdPrefixesListModel = DefaultListModel<String>()
+    private val groupIdPrefixesList = JBList(groupIdPrefixesListModel)
+    private val newPrefixField = JBTextField(20)
+
     private val settings = MavenVersionHelperSettings.getInstance(project)
 
     init {
@@ -34,6 +40,11 @@ class ConfigurationDialog(
         excludePathsListModel.clear()
         settings.getExcludedPaths().forEach { path ->
             excludePathsListModel.addElement(path)
+        }
+
+        groupIdPrefixesListModel.clear()
+        settings.getGroupIdPrefixes().forEach { prefix ->
+            groupIdPrefixesListModel.addElement(prefix)
         }
     }
 
@@ -108,7 +119,6 @@ class ConfigurationDialog(
 
         addPanel.add(inputPanel, BorderLayout.CENTER)
 
-        // 说明文本
         val helpPanel = JPanel(FlowLayout(FlowLayout.LEFT))
         helpPanel.add(JBLabel("<html><small>说明: 以 '/' 开头的相对路径，如 '/dalgen', '/target' 等</small></html>"))
         addPanel.add(helpPanel, BorderLayout.SOUTH)
@@ -124,19 +134,52 @@ class ConfigurationDialog(
         val configPanel = JPanel()
         configPanel.layout = BoxLayout(configPanel, BoxLayout.Y_AXIS)
 
-        // GroupId前缀配置
-        val prefixPanel = JPanel(FlowLayout(FlowLayout.LEFT))
-        prefixPanel.add(JBLabel("GroupId前缀:"))
-        prefixPanel.add(groupIdPrefixField)
-        configPanel.add(prefixPanel)
+        // GroupId前缀配置列表
+        val prefixPanel = JPanel(BorderLayout())
+        val top = JPanel(FlowLayout(FlowLayout.LEFT))
+        top.add(JBLabel("GroupId 前缀列表:"))
+        prefixPanel.add(top, BorderLayout.NORTH)
+
+        groupIdPrefixesList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        val prefixScroll = JBScrollPane(groupIdPrefixesList)
+        prefixScroll.preferredSize = Dimension(400, 150)
+        prefixPanel.add(prefixScroll, BorderLayout.CENTER)
+
+        val prefixControl = JPanel(FlowLayout(FlowLayout.LEFT))
+        prefixControl.add(JBLabel("新前缀:"))
+        prefixControl.add(newPrefixField)
+        val addPrefixBtn = JButton("添加")
+        addPrefixBtn.addActionListener {
+            val newPrefix = newPrefixField.text.trim()
+            if (newPrefix.isNotBlank()) {
+                if (!groupIdPrefixesListModel.contains(newPrefix)) {
+                    groupIdPrefixesListModel.addElement(newPrefix)
+                    newPrefixField.text = ""
+                } else {
+                    ApplicationManager.getApplication().invokeLater {
+                        Messages.showWarningDialog(project, "前缀 `$newPrefix` 已存在", "重复前缀")
+                    }
+                }
+            }
+        }
+        val removePrefixBtn = JButton("删除选中")
+        removePrefixBtn.addActionListener {
+            val idx = groupIdPrefixesList.selectedIndex
+            if (idx >= 0) {
+                groupIdPrefixesListModel.removeElementAt(idx)
+            }
+        }
+        prefixControl.add(addPrefixBtn)
+        prefixControl.add(removePrefixBtn)
+        prefixPanel.add(prefixControl, BorderLayout.SOUTH)
 
         // 说明
         val helpPanel = JPanel(FlowLayout(FlowLayout.LEFT))
-        helpPanel.add(JBLabel("<html><small>说明: 版本检查只会检查以此前缀开头的GroupId，默认为'com.ly'</small></html>"))
+        helpPanel.add(JBLabel("<html><small>说明: 版本检查只会检查以此前缀开头的 GroupId，示例: 'com.ly', 'org.example'</small></html>"))
+
+        configPanel.add(prefixPanel)
         configPanel.add(helpPanel)
-
         panel.add(configPanel, BorderLayout.NORTH)
-
         return panel
     }
 
@@ -148,8 +191,13 @@ class ConfigurationDialog(
         }
         settings.setExcludedPaths(paths)
 
-        // 保存GroupId前缀配置
-        settings.setGroupIdPrefix(groupIdPrefixField.text.trim())
+        // 保存 GroupId 前缀列表
+        val prefixes = mutableListOf<String>()
+        for (i in 0 until groupIdPrefixesListModel.size()) {
+            prefixes.add(groupIdPrefixesListModel.getElementAt(i))
+        }
+        settings.setGroupIdPrefixes(prefixes)
+
         ApplicationManager.getApplication().invokeLater {
             Messages.showInfoMessage(
                 project, "配置已保存", "保存成功"

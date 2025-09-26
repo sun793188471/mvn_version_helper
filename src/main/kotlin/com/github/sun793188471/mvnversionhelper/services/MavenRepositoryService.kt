@@ -287,14 +287,6 @@ class MavenRepositoryService(private val project: Project) {
     }
 
     /**
-     * 获取最大的Release版本（不包含SNAPSHOT的版本）
-     */
-    private fun getMaxReleaseVersion(versions: List<String>): String? {
-        val releaseVersions = versions.filter { !it.contains("SNAPSHOT", ignoreCase = true) }
-        return getMaxVersion(releaseVersions)
-    }
-
-    /**
      * 版本号比较
      * 支持格式: 1.9.3.200-qa-SNAPSHOT, 1.7.3.40-uat-SNAPSHOT 等
      */
@@ -329,92 +321,6 @@ class MavenRepositoryService(private val project: Project) {
 
         return baseVersion.split(".")
             .mapNotNull { it.toIntOrNull() }
-    }
-
-    /**
-     * 获取当前项目的Maven项目列表
-     */
-    fun getMavenProjects(): List<MavenProject> {
-        return getMavenProjectsManager().projects
-    }
-
-    /**
-     * 检查指定前缀的项目版本
-     */
-    fun checkVersions(groupIdPrefix: String = "com.ly"): List<VersionInfo> {
-        val results = mutableListOf<VersionInfo>()
-
-        getMavenProjects().forEach { mavenProject ->
-            val groupId = mavenProject.mavenId.groupId
-            val artifactId = mavenProject.mavenId.artifactId
-            val currentVersion = mavenProject.mavenId.version
-
-            // 只检查指定前缀的groupId
-            if (groupId != null && artifactId != null && groupId.startsWith(groupIdPrefix)) {
-                try {
-                    val (latestRelease, latestSnapshot) = getRemoteVersions(groupId, artifactId)
-                    results.add(
-                        VersionInfo(
-                            groupId = groupId,
-                            artifactId = artifactId,
-                            latestRelease = latestRelease,
-                            latestSnapshot = latestSnapshot,
-                            currentVersion = currentVersion
-                        )
-                    )
-                } catch (e: Exception) {
-                    logger.warn("版本检查失败: $groupId:$artifactId", e)
-                    results.add(
-                        VersionInfo(
-                            groupId = groupId,
-                            artifactId = artifactId,
-                            currentVersion = currentVersion
-                        )
-                    )
-                }
-            }
-        }
-
-        return results
-    }
-
-    /**
-     * 获取当前项目的版本信息
-     */
-    fun getCurrentProjectVersions(): List<VersionInfo> {
-        val results = mutableListOf<VersionInfo>()
-
-        getMavenProjects().forEach { mavenProject ->
-            val groupId = mavenProject.mavenId.groupId
-            val artifactId = mavenProject.mavenId.artifactId
-            val currentVersion = mavenProject.mavenId.version
-
-            if (groupId != null && artifactId != null) {
-                try {
-                    val (latestRelease, latestSnapshot) = getRemoteVersions(groupId, artifactId)
-                    results.add(
-                        VersionInfo(
-                            groupId = groupId,
-                            artifactId = artifactId,
-                            latestRelease = latestRelease,
-                            latestSnapshot = latestSnapshot,
-                            currentVersion = currentVersion
-                        )
-                    )
-                } catch (e: Exception) {
-                    logger.warn("获取项目版本信息失败: $groupId:$artifactId", e)
-                    results.add(
-                        VersionInfo(
-                            groupId = groupId,
-                            artifactId = artifactId,
-                            currentVersion = currentVersion
-                        )
-                    )
-                }
-            }
-        }
-
-        return results
     }
 
     companion object {

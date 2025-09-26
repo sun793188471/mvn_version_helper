@@ -12,7 +12,7 @@ class MavenVersionHelperSettings : PersistentStateComponent<MavenVersionHelperSe
 
     data class State(
         var excludedPaths: MutableList<String> = mutableListOf("/dalgen"),
-        var groupIdPrefix: String = "com.ly"
+        var groupIdPrefixes: MutableList<String> = mutableListOf("com.ly")
     )
 
     private var myState = State()
@@ -29,10 +29,10 @@ class MavenVersionHelperSettings : PersistentStateComponent<MavenVersionHelperSe
         myState.excludedPaths = paths.toMutableList()
     }
 
-    fun getGroupIdPrefix(): String = myState.groupIdPrefix
+    fun getGroupIdPrefixes(): List<String> = myState.groupIdPrefixes.toList()
 
-    fun setGroupIdPrefix(prefix: String) {
-        myState.groupIdPrefix = prefix
+    fun setGroupIdPrefixes(prefixes: List<String>) {
+        myState.groupIdPrefixes = prefixes.toMutableList()
     }
 
     companion object {
