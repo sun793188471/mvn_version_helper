@@ -41,9 +41,9 @@ class VersionUpdateDialog(
     private val logger = Logger.getInstance(VersionUpdateDialog::class.java)
 
     private var pomFiles = versionService.findPomFiles()
-    private val realBranchName = versionService.getRealBranchName()
-    private val branchType = versionService.getBranchType(realBranchName)
-    private val currentProjectVersion = versionService.getCurrentProjectRemoteVersions(branchType, pomFiles)
+    private var realBranchName = versionService.getRealBranchName()
+    private var branchType = versionService.getBranchType(realBranchName)
+    private var currentProjectVersion = versionService.getCurrentProjectRemoteVersions(branchType, pomFiles)
     private var parentFile: XmlFile? = null
 
     // 用于缓存版本信息，避免重复请求
@@ -273,6 +273,11 @@ class VersionUpdateDialog(
                     indicator.text = "重新获取项目版本信息..."
                     indicator.fraction = 0.5
 
+                    // 获取分支名称
+                    realBranchName = versionService.getRealBranchName()
+                    // 重新获取分支信息
+                    branchType = versionService.getBranchType(realBranchName)
+
                     // 重新获取项目版本信息
                     val refreshedProjectVersion = versionService.getCurrentProjectRemoteVersions(branchType, pomFiles)
                     logger.info("重新获取项目版本信息: Release=${refreshedProjectVersion.first}, Snapshot=${refreshedProjectVersion.second}")
@@ -342,7 +347,6 @@ class VersionUpdateDialog(
 
             projectVersionPanel.revalidate()
             projectVersionPanel.repaint()
-
         } catch (e: Exception) {
             logger.warn("获取项目版本信息失败", e)
             projectVersionPanel.removeAll()

@@ -147,10 +147,15 @@ class DependencyVersionCheckDialog(
 
                 dependencyTags.forEachIndexed { index, depTag ->
                     if (indicator.isCanceled) return
-
-                    val groupId = depTag.findFirstSubTag("groupId")?.value?.text
-                    val artifactId = depTag.findFirstSubTag("artifactId")?.value?.text
-                    val versionTag = depTag.findFirstSubTag("version")
+                    val groupId = com.intellij.openapi.application.ReadAction.compute<String?, Throwable> {
+                        depTag.findFirstSubTag("groupId")?.value?.text
+                    }
+                    val artifactId = com.intellij.openapi.application.ReadAction.compute<String?, Throwable> {
+                        depTag.findFirstSubTag("artifactId")?.value?.text
+                    }
+                    val versionTag = com.intellij.openapi.application.ReadAction.compute<XmlTag, Throwable> {
+                        depTag.findFirstSubTag("version")
+                    }
                     var version = com.intellij.openapi.application.ReadAction.compute<String?, Throwable> {
                         versionTag?.value?.text
                     }

@@ -154,7 +154,7 @@ class MavenVersionService(private val project: Project) {
                 if (remoteBranch != null) {
                     // 去除远端别名，保留完整分支路径
                     // 例如：origin/111/222/aaa -> 111/222/aaa
-                    remoteBranch.nameForRemoteOperations
+                    return remoteBranch.nameForRemoteOperations
                 }
             }
 
@@ -173,7 +173,7 @@ class MavenVersionService(private val project: Project) {
                     remoteBranchName
                 }
             }
-            currentBranch
+            return currentBranch
         } catch (e: Exception) {
             logger.warn("Failed to get remote branch info", e)
             null
@@ -230,9 +230,14 @@ class MavenVersionService(private val project: Project) {
         val mainPomFile = pomFiles.first()
         val rootTag = mainPomFile.rootTag ?: return Pair(null, null)
 
-        val groupId = rootTag.findFirstSubTag("groupId")?.value?.text
-            ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
-        val artifactId = rootTag.findFirstSubTag("artifactId")?.value?.text
+        val groupId = com.intellij.openapi.application.ReadAction.compute<String?, Throwable> {
+            rootTag.findFirstSubTag("groupId")?.value?.text
+                ?: rootTag.findFirstSubTag("parent")?.findFirstSubTag("groupId")?.value?.text
+        }
+
+        val artifactId = com.intellij.openapi.application.ReadAction.compute<String?, Throwable> {
+            rootTag.findFirstSubTag("artifactId")?.value?.text
+        }
 
         return if (groupId != null && artifactId != null) {
             try {
@@ -290,7 +295,7 @@ class MavenVersionService(private val project: Project) {
 
             // walle/fix-walle/ 开头的分支
             branchName.startsWith("walle/fix-walle/") -> {
-                val suffix = branchName.substringAfterLast("-")
+                val suffix = branchName.substringAfterLast("/")
                 when {
                     suffix.contains("-qa-", ignoreCase = true) -> BranchType.QA
                     suffix.contains("-uat-", ignoreCase = true) -> BranchType.UAT
@@ -320,6 +325,28 @@ class MavenVersionService(private val project: Project) {
                     else -> BranchType.OTHER
                 }
             }
+
+            // walle/Repair_ 开头的分支
+            branchName.startsWith("walle/Repair_") -> {
+                val afterConflict = branchName.substringAfter("walle/Repair_")
+                val conflictType = when {
+                    afterConflict.contains("_uat", ignoreCase = true) -> "uat"
+                    afterConflict.contains("_qa", ignoreCase = true) -> "qa"
+                    afterConflict.contains("_hotfix", ignoreCase = true) -> "hotfix"
+                    afterConflict.contains("_release", ignoreCase = true) -> "release"
+                    afterConflict.contains("_master", ignoreCase = true) -> "master"
+                    else -> null
+                }
+                when (conflictType?.lowercase()) {
+                    "qa" -> BranchType.QA
+                    "uat" -> BranchType.UAT
+                    "hotfix" -> BranchType.HOTFIX
+                    "release" -> BranchType.RELEASE
+                    "master" -> BranchType.MASTER
+                    else -> BranchType.OTHER
+                }
+            }
+
 
             // 开发分支 Task_12345_XXX
             branchName.contains("Task_") -> {
