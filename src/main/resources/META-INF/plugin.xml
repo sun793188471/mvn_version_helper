@@ -16,5 +16,11 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="TcCodeGeneratorAction"
+                class="com.github.sun793188471.mvnversionhelper.action.TcCodeGeneratorAction"
+                text="TC Code Generator"
+                description="根据输入生成TC相关代码">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

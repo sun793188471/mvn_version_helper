@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:dubbo="http://code.alibabatech.com/schema/dubbo"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+         http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+         http://code.alibabatech.com/schema/dubbo http://code.alibabatech.com/schema/dubbo/dubbo.xsd"
+       default-autowire="byName">
+
+    <context:component-scan base-package="com.ly.flight.intl.treasurecore.facade"/>
+
+    <!-- 蜂巢服务元数据配置 -->
+    <dubbo:registry id="tcdsfRegistry" address="${dubbo.registry.address}"
+                    protocol="tcdsf"/>
+    <dubbo:protocol name="tcdsfrest" port="${dubbo.port}"
+                    server="${dubbo.service.deploy.container}"/>
+
+    <bean id="tcdsfGroup" class="com.alibaba.dubbo.registry.tcdsf.DsfServiceGroup">
+        <constructor-arg name="registry" ref="tcdsfRegistry"/>
+        <!-- 使用天眼申请的蜂巢DSF应用名称 -->
+        <constructor-arg name="gsName" value="${dubbo.tcdsfGroup.gsName}"/>
+        <constructor-arg name="version"
+                         value="${dsf.iflight.treasure.core.version}"/>
+        <constructor-arg name="cLevel" value="1"/>
+        <constructor-arg name="pLevel" value="5"/>
+        <constructor-arg name="services">
+            <set>
+                <ref bean="dsfTreasureCoreFacade"/>
+                <ref bean="dsfMerchantConfigFacade"/>
+                <ref bean="dsfAirlineConfigFacade"/>
+                <ref bean="dsfAirlinePayoutRemitinConfigFacade"/>
+                <ref bean="dsfRefundStateTipsConfigFacade"/>
+                <ref bean="dsfBaseConfigFacade"/>
+                <ref bean="dsfTodayInvalidConfigFacade"/>
+                <ref bean="dsfRefundWaitDelayConfigFacade"/>
+                <ref bean="dsfDelayFrontFeedbackConfigFacade"/>
+                <ref bean="dsfPayoutAfterRemitInConfigFacade"/>
+                <ref bean="dsfChangeConfigFacade"/>
+                <ref bean="dsfRefundOrderDelayPayoutConfigFacade"/>
+                <ref bean="dsfHandleDescConfigFacade"/>
+                <ref bean="dsfRefundConfigFacade"/>
+                <ref bean="dsfRefundSubCategoryConfigFacade"/>
+                <ref bean="dsfDelayConfigFacade"/>
+                <ref bean="dsfReverseChannelConfigFacade"/>
+                <ref bean="dsfFlowTestConfigFacade"/>
+            </set>
+        </constructor-arg>
+    </bean>
+
+    <!-- 蜂巢服务发布 -->
+    <dubbo:service id="dsfTreasureCoreFacade" ref="treasureCoreFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.TreasureCoreFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfMerchantConfigFacade" ref="merchantConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.MerchantConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfAirlineConfigFacade" ref="airlineConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.AirlineConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfAirlinePayoutRemitinConfigFacade" ref="airlinePayoutRemitinConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.AirlinePayoutRemitinConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfRefundStateTipsConfigFacade" ref="refundStateTipsConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.RefundStateTipsConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfBaseConfigFacade" ref="baseConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.BaseConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfTodayInvalidConfigFacade" ref="todayInvalidConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.TodayInvalidConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfRefundWaitDelayConfigFacade" ref="refundWaitDelayConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.RefundWaitDelayConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfDelayFrontFeedbackConfigFacade" ref="delayFrontFeedbackConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.DelayFrontFeedbackConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfPayoutAfterRemitInConfigFacade" ref="payoutAfterRemitInConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.PayoutAfterRemitInConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfChangeConfigFacade" ref="changeConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.ChangeConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfRefundOrderDelayPayoutConfigFacade" ref="refundOrderDelayPayoutConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.RefundOrderDelayPayoutConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfHandleDescConfigFacade" ref="handleDescConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.HandleDescConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfRefundConfigFacade" ref="refundConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.RefundConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfRefundSubCategoryConfigFacade" ref="refundSubCategoryConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.RefundSubCategoryConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfDelayConfigFacade" ref="delayConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.DelayConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfReverseChannelConfigFacade" ref="reverseChannelConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.ReverseChannelConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+    <dubbo:service id="dsfFlowTestConfigFacade" ref="flowTestConfigFacade"
+                   interface="com.ly.flight.intl.treasurecore.facade.FlowTestConfigFacade"
+                   protocol="tcdsfrest">
+    </dubbo:service>
+</beans>
