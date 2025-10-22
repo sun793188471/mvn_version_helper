@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <parent>
+        <groupId>com.ly.flight.intl</groupId>
+        <artifactId>delaycore-parent</artifactId>
+        <version>1.6.1.35-520536-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>delaycore-biz</artifactId>
+    <packaging>jar</packaging>
+
+    <name>LY delaycore-biz</name>
+    <description>LY delaycore-biz</description>
+
+    <dependencies>
+        <!-- project depends -->
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>delaycore-integration</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>delaycore-model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>refundcore-model</artifactId>
+            <exclusions>
+                <exclusion>
+                    <artifactId>tradecore-facade</artifactId>
+                    <groupId>com.ly.flight.intl</groupId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>delaycore-dal</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>delaycore-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>reversebase-common</artifactId>
+            <exclusions>
+                <exclusion>
+                    <artifactId>xstream</artifactId>
+                    <groupId>com.thoughtworks.xstream</groupId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>reversebase-biz</artifactId>
+            <exclusions>
+                <exclusion>
+                    <artifactId>treasurecore-client</artifactId>
+                    <groupId>com.ly.flight.intl</groupId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>reversebase-member</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>reversebase-eventbus</artifactId>
+        </dependency>
+        <!-- 退改公共模块-状态机 -->
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>reversebase-state-machine</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>reversebase-member</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>reverseauxiliary-model</artifactId>
+        </dependency>
+
+        <!--  配置client   -->
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>treasurecore-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>treasurecore-model</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.ly.sof</groupId>
+            <artifactId>sof-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.sof</groupId>
+            <artifactId>sof-fsm</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.ie.arch</groupId>
+            <artifactId>invoker</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.hibernate</groupId>
+            <artifactId>hibernate-validator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct-jdk8</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.javatuples</groupId>
+            <artifactId>javatuples</artifactId>
+        </dependency>
+
+        <!-- Test dependecies -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-all</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.easymock</groupId>
+            <artifactId>easymock</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.powermock</groupId>
+            <artifactId>powermock-module-junit4</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.powermock</groupId>
+            <artifactId>powermock-api-easymock</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.ly.flight.intl</groupId>
+            <artifactId>changecore-model</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.ly.sof</groupId>
+            <artifactId>sof-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.ly.codex</groupId>
+            <artifactId>codex-sdk-client</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.ly.iflight</groupId>
+            <artifactId>quick-data-log-sdk</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.sun.mail</groupId>
+            <artifactId>javax.mail</artifactId>
+        </dependency>
+    </dependencies>
+</project>
